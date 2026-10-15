@@ -20,6 +20,7 @@ class DocumentCreate(BaseModel):
 
 
 class DocumentUpdate(BaseModel):
+    expected_updated_at: datetime | None = None
     title: str | None = Field(default=None, min_length=1, max_length=500)
     source_url: str | None = Field(default=None, max_length=2048)
     content_markdown: str | None = Field(default=None, max_length=1_000_000)
@@ -146,7 +147,21 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
 @router.put("/documents/{document_id}")
 def update_document(document_id: str, body: DocumentUpdate, db: Session = Depends(get_db)):
     document = _get_document(db, document_id)
-    changes = body.model_dump(exclude_unset=True)
+    if body.expected_updated_at is not None:
+        expected = body.expected_updated_at
+        current = document.updated_at
+        # SQLite may return naive datetimes even though the API emits UTC timestamps.
+        if expected.tzinfo is None:
+            expected = expected.replace(tzinfo=timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        if expected.astimezone(timezone.utc) != current.astimezone(timezone.utc):
+            raise HTTPException(status_code=409, detail={
+                "code": "DOCUMENT_VERSION_CONFLICT",
+                "message": "The reading document changed on the server.",
+                "server_updated_at": current.isoformat(),
+            })
+    changes = body.model_dump(exclude_unset=True, exclude={"expected_updated_at"})
     if "title" in changes:
         title = (changes["title"] or "").strip()
         if not title:
