@@ -641,6 +641,92 @@ async function renderSyncQueue() {
       await syncOutbox();
     });
     row.append(retry);
+
+    if (op.status === "conflict" && op.entity_type === "reading_document_update") {
+      const compareButton = document.createElement("button");
+      compareButton.textContent = "比较本地与服务器版本";
+      const comparison = document.createElement("pre");
+      comparison.className = "answer";
+      comparison.hidden = true;
+      compareButton.addEventListener("click", async () => {
+        if (!comparison.hidden) {
+          comparison.hidden = true;
+          compareButton.textContent = "比较本地与服务器版本";
+          return;
+        }
+        comparison.textContent = "正在获取服务器版本…";
+        comparison.hidden = false;
+        try {
+          const response = await fetch("/api/documents/" + encodeURIComponent(op.entity_id));
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          const server = await response.json();
+          comparison.textContent = [
+            "===== 本地待同步版本 =====",
+            "标题：" + (op.payload.title || ""),
+            "原文链接：" + (op.payload.source_url || ""),
+            "",
+            op.payload.content_markdown || "",
+            "",
+            "===== 当前服务器版本 =====",
+            "标题：" + (server.title || ""),
+            "原文链接：" + (server.source_url || ""),
+            "",
+            server.content_markdown || ""
+          ].join("\\n");
+        } catch (error) {
+          comparison.textContent = "无法读取服务器版本：" + error.message + "。本地内容仍保留。";
+        }
+      });
+      const keepLocal = document.createElement("button");
+      keepLocal.textContent = "保留本地版本并覆盖服务器";
+      keepLocal.addEventListener("click", async () => {
+        if (!confirm("将用本地版本覆盖当前服务器版本。此操作不可自动合并，确定继续吗？")) return;
+        try {
+          const response = await fetch("/api/documents/" + encodeURIComponent(op.entity_id));
+          if (!response.ok) throw new Error("无法读取服务器最新版本（HTTP " + response.status + "）");
+          const server = await response.json();
+          op.payload.expected_updated_at = server.updated_at;
+          op.status = "pending";
+          delete op.server_message;
+          await transact("outbox", "readwrite", store => store.put(op));
+          await renderSyncQueue();
+          await syncOutbox();
+        } catch (error) {
+          statusEl.textContent = error.message + "；本地版本仍保留。";
+        }
+      });
+      const keepServer = document.createElement("button");
+      keepServer.textContent = "放弃本地修改，保留服务器版本";
+      keepServer.addEventListener("click", async () => {
+        if (!confirm("删除这条本地待同步修改，并以服务器版本为准？")) return;
+        try {
+          const response = await fetch("/api/documents/" + encodeURIComponent(op.entity_id));
+          if (!response.ok) throw new Error("无法读取服务器版本（HTTP " + response.status + "）");
+          const server = await response.json();
+          await transact("outbox", "readwrite", store => store.delete(op.operation_id));
+          const cached = await getById("readingDocuments", op.entity_id);
+          await transact("readingDocuments", "readwrite", store => store.put({
+            ...(cached || {}), ...server, id: op.entity_id,
+            progress: cached?.progress || server.progress,
+            highlights: cached?.highlights || server.highlights || [],
+            pending_sync: false
+          }));
+          if (activeDocumentId === op.entity_id) {
+            document.querySelector("#readingEditTitle").value = server.title || "";
+            document.querySelector("#readingEditUrl").value = server.source_url || "";
+            document.querySelector("#readingBody").value = server.content_markdown || "";
+            document.querySelector("#readingCurrentTitle").textContent = server.title || "";
+            document.querySelector("#readingSource").textContent = server.source_url || "未设置原文链接";
+          }
+          statusEl.textContent = "已保留服务器版本，本地冲突修改已移除。";
+          await renderSyncQueue();
+          await loadReadingList();
+        } catch (error) {
+          statusEl.textContent = error.message + "；本地版本仍保留。";
+        }
+      });
+      row.append(compareButton, keepLocal, keepServer, comparison);
+    }
     list.append(row);
   }
   document.querySelector("#retrySyncQueue").disabled = !navigator.onLine || pending.length === 0;
