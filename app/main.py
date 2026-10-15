@@ -159,7 +159,7 @@ def _extract_wikilinks(markdown: str) -> list[str]:
     """Return unique [[target]] links in first-seen order; ignore empty targets."""
     targets = []
     seen = set()
-    for match in re.finditer(r"(?<!!)\\[\\[([^\\]]+)\\]\\]", markdown):
+    for match in re.finditer(r"(?<!!)\[\[([^\]]+)\]\]", markdown):
         target = match.group(1).split("|", 1)[0].split("#", 1)[0].strip()
         if target and target.casefold() not in seen:
             seen.add(target.casefold())
