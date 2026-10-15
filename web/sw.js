@@ -1,4 +1,4 @@
-const CACHE = "vibereading-shell-v16";
+const CACHE = "vibereading-shell-v17";
 const SHELL = ["/web/index.html", "/web/app.js", "/web/manifest.webmanifest"];
 
 self.addEventListener("install", event => {
