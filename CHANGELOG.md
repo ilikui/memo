@@ -33,3 +33,4 @@
 - Strengthened stale reading-edit regression coverage to verify rejected updates do not partially change title, source URL, or body.
 - Improved reading-conflict comparison with line-by-line additions/removals; very large documents fall back to readable side-by-side versions to limit memory use.
 - Added API regression coverage for an intentional reading-document conflict-resolution retry against the latest server version.
+- Fixed keep-server conflict resolution to rebuild the local article cache from the latest server document, then replay remaining queued reading progress and highlights; the active highlights view refreshes afterward.
