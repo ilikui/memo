@@ -334,10 +334,14 @@ def test_stale_reading_document_update_returns_conflict():
 
     stale = client.put(f"/api/documents/{document['id']}", json={
         "title": "Offline local version",
+        "source_url": "https://example.org/stale-local-edit",
         "content_markdown": "Local changes must not overwrite the server silently.",
         "expected_updated_at": document["updated_at"],
     })
     assert stale.status_code == 409
     assert stale.json()["detail"]["code"] == "DOCUMENT_VERSION_CONFLICT"
     current = client.get(f"/api/documents/{document['id']}").json()
+    # A stale update must reject the whole payload, not partially apply fields.
     assert current["title"] == "Server version"
+    assert current["source_url"] is None
+    assert current["content_markdown"] == "Original"
