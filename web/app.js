@@ -1029,9 +1029,15 @@ async function convertHighlightToKnowledge(highlight, target) {
 }
 
 async function reloadHighlights() {
-  if (!activeDocumentId) return;
+  if (!activeDocumentId || !navigator.onLine) return;
   const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/highlights");
-  if (response.ok) renderHighlights(await response.json());
+  if (!response.ok) return;
+  const highlights = await response.json();
+  renderHighlights(highlights);
+  const cached = await getById("readingDocuments", activeDocumentId);
+  if (cached) {
+    await transact("readingDocuments", "readwrite", store => store.put({ ...cached, highlights }));
+  }
 }
 
 async function createReadingHighlight() {
