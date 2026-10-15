@@ -740,8 +740,8 @@ async function openReadingDocument(id) {
     document.querySelector("#readingEditor").hidden = false;
     document.querySelector("#readingCurrentTitle").textContent = item.title;
     document.querySelector("#readingSource").textContent = item.source_url || "未设置原文链接";
-    document.querySelector("#readingTitle").value = item.title;
-    document.querySelector("#readingUrl").value = item.source_url || "";
+    document.querySelector("#readingEditTitle").value = item.title;
+    document.querySelector("#readingEditUrl").value = item.source_url || "";
     document.querySelector("#readingBody").value = item.content_markdown || "";
     document.querySelector("#readingStatus").value = item.progress.status;
     document.querySelector("#readingProgress").value = item.progress.progress_percent;
@@ -789,8 +789,8 @@ async function createReadingDocument() {
 
 async function saveReadingDocument() {
   if (!activeDocumentId) return;
-  const title = document.querySelector("#readingTitle").value.trim();
-  const source_url = document.querySelector("#readingUrl").value.trim() || null;
+  const title = document.querySelector("#readingEditTitle").value.trim();
+  const source_url = document.querySelector("#readingEditUrl").value.trim() || null;
   const content_markdown = document.querySelector("#readingBody").value;
   if (!title) {
     statusEl.textContent = "文章标题不能为空。";
@@ -926,4 +926,4 @@ document.querySelector("#readingStatus").addEventListener("change", event => {
 
 await openDb();
 statusEl.textContent = navigator.onLine ? "在线" : "离线";
-await Promise.all([loadNotes(), refresh()]);
+await Promise.all([loadNotes(), refresh(), loadReadingList()]);
