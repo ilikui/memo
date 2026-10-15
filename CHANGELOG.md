@@ -29,3 +29,5 @@
 - Added API coverage for stale reading-document update conflicts.
 
 - Added reading-document conflict comparison and explicit local/server version resolution in the sync queue.
+
+- Strengthened stale reading-edit regression coverage to verify rejected updates do not partially change title, source URL, or body.
