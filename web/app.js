@@ -38,6 +38,13 @@ async function getAll(name) {
   });
 }
 
+function getPendingNoteOperation(noteId) {
+  // The renderer is synchronous; the most recent in-memory list is refreshed on each load.
+  return pendingNoteOperations.find(op => op.entity_id === noteId) || null;
+}
+
+let pendingNoteOperations = [];
+
 function renderNotes() {
   const query = document.querySelector("#noteSearch").value.trim().toLocaleLowerCase();
   const matches = cachedNotes.filter(note =>
@@ -58,6 +65,26 @@ function renderNotes() {
     meta.textContent = note.note_type + " · " + new Date(note.updated_at).toLocaleString();
     const excerpt = document.createElement("p");
     excerpt.textContent = note.body_markdown.slice(0, 180);
+    const pending = getPendingNoteOperation(note.id);
+    if (pending) {
+      const syncState = document.createElement("p");
+      syncState.className = "muted";
+      syncState.textContent = pending.status === "conflict"
+        ? "同步冲突：本地版本已保留。可放弃本地修改并重新加载服务器版本。"
+        : "本地修改待同步；联网后自动重试。";
+      row.append(syncState);
+      if (pending.status === "conflict") {
+        const discard = document.createElement("button");
+        discard.textContent = "放弃本地修改";
+        discard.addEventListener("click", async () => {
+          if (!confirm("放弃本地修改会丢弃此笔记的待同步版本，继续吗？")) return;
+          await transact("outbox", "readwrite", store => store.delete(pending.operation_id));
+          await loadNotes();
+          statusEl.textContent = "已放弃本地修改并刷新笔记列表。";
+        });
+        row.append(discard);
+      }
+    }
     const edit = document.createElement("button");
     edit.textContent = "编辑";
     edit.addEventListener("click", () => {
@@ -79,8 +106,14 @@ async function loadNotes() {
     try {
       const response = await fetch("/api/notes?limit=500");
       if (response.ok) {
+        const pending = (await getAll("outbox"))
+          .filter(op => op.entity_type === "note_mutation")
+          .map(op => op.entity_id);
+        const pendingIds = new Set(pending);
         for (const note of await response.json()) {
-          await transact("notes", "readwrite", store => store.put(note));
+          if (!pendingIds.has(note.id)) {
+            await transact("notes", "readwrite", store => store.put(note));
+          }
         }
       }
     } catch {
@@ -90,6 +123,7 @@ async function loadNotes() {
   cachedNotes = (await getAll("notes")).sort((a, b) =>
     new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
   );
+  pendingNoteOperations = (await getAll("outbox")).filter(op => op.entity_type === "note_mutation");
   renderNotes();
 }
 
@@ -110,30 +144,36 @@ async function saveNote() {
     statusEl.textContent = "请填写笔记标题。";
     return;
   }
-  if (!navigator.onLine) {
-    statusEl.textContent = "当前版本支持离线阅读缓存；离线编辑保存尚未启用，请联网后保存。";
-    return;
-  }
-  const payload = { title, body_markdown, note_type };
   const isEditing = Boolean(editingNoteId);
-  try {
-    const response = await fetch(isEditing ? "/api/notes/" + encodeURIComponent(editingNoteId) : "/api/notes", {
-      method: isEditing ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!response.ok) {
-      statusEl.textContent = "保存笔记失败（HTTP " + response.status + "）。";
-      return;
-    }
-    const note = await response.json();
-    await transact("notes", "readwrite", store => store.put(note));
-    statusEl.textContent = isEditing ? "笔记已更新。" : "笔记已保存。";
-    resetNoteEditor();
-    await loadNotes();
-  } catch {
-    statusEl.textContent = "无法连接服务器；笔记未保存。";
-  }
+  const previous = isEditing ? cachedNotes.find(note => note.id === editingNoteId) : null;
+  const now = new Date().toISOString();
+  const note = {
+    id: isEditing ? editingNoteId : crypto.randomUUID(),
+    title, body_markdown, note_type,
+    document_id: previous?.document_id ?? null,
+    created_at: previous?.created_at ?? now,
+    updated_at: now
+  };
+  const operation = {
+    operation_id: crypto.randomUUID(),
+    entity_type: "note_mutation",
+    entity_id: note.id,
+    operation: isEditing ? "update" : "create",
+    payload: {
+      note,
+      expected_updated_at: previous?.updated_at ?? null
+    },
+    client_created_at: now,
+    status: "pending"
+  };
+  await transact("notes", "readwrite", store => store.put(note));
+  await transact("outbox", "readwrite", store => store.put(operation));
+  statusEl.textContent = navigator.onLine
+    ? "笔记已本地保存，正在同步…"
+    : "离线：笔记已保存在本机，联网后自动同步。";
+  resetNoteEditor();
+  await loadNotes();
+  await syncOutbox();
 }
 
 async function refresh() {
@@ -244,13 +284,42 @@ async function queueReview(card, rating) {
 
 async function syncOutbox() {
   if (!navigator.onLine) {
-    statusEl.textContent = "离线：待同步复习会在恢复连接后重试。";
+    statusEl.textContent = "离线：笔记和复习操作会在恢复连接后重试。";
     return;
   }
   const operations = (await getAll("outbox")).filter(op => op.status !== "conflict");
   for (const operation of operations) {
     try {
-      const response = await fetch("/api/flashcards/" + encodeURIComponent(operation.entity_id) + "/review", {
+      let response;
+      if (operation.entity_type === "note_mutation") {
+        const note = operation.payload.note;
+        const isCreate = operation.operation === "create";
+        const payload = isCreate
+          ? { id: note.id, title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id }
+          : { title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id, expected_updated_at: operation.payload.expected_updated_at };
+        response = await fetch(isCreate ? "/api/notes" : "/api/notes/" + encodeURIComponent(note.id), {
+          method: isCreate ? "POST" : "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          const saved = await response.json();
+          await transact("notes", "readwrite", store => store.put(saved));
+          await transact("outbox", "readwrite", store => store.delete(operation.operation_id));
+          statusEl.textContent = "笔记已同步。";
+        } else if (response.status === 409) {
+          operation.status = "conflict";
+          operation.server_message = "服务器上的笔记版本已变化。";
+          await transact("outbox", "readwrite", store => store.put(operation));
+          statusEl.textContent = "笔记同步冲突：本地版本已保留，请手动处理。";
+        } else {
+          statusEl.textContent = "笔记同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
+        }
+        continue;
+      }
+
+      if (operation.entity_type !== "flashcard_review") continue;
+      response = await fetch("/api/flashcards/" + encodeURIComponent(operation.entity_id) + "/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -276,6 +345,7 @@ async function syncOutbox() {
       return;
     }
   }
+  await loadNotes();
   await refresh();
 }
 
