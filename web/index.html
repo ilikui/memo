@@ -15,6 +15,14 @@ textarea{min-height:180px;font:inherit}
 .note-row p{margin:.25rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .muted{opacity:.72;font-size:.9rem}
 .answer{white-space:pre-wrap;overflow-wrap:anywhere}
+.diff-legend{margin:.35rem 0 .6rem}
+.diff-line{display:grid;grid-template-columns:1.25rem 2.5rem minmax(0,1fr);gap:.35rem;padding:.1rem .4rem;border-bottom:1px solid #8882;font: .88rem/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.diff-marker,.diff-number{opacity:.65;user-select:none}
+.diff-number{text-align:right}
+.diff-removed{background:color-mix(in srgb,#dc2626 12%,transparent)}
+.diff-added{background:color-mix(in srgb,#16a34a 12%,transparent)}
+.diff-text{min-width:0}
+.diff-fallback{max-height:24rem;overflow:auto;border:1px solid #8884;border-radius:8px;padding:.75rem}
 </style></head>
 <body>
 <h1>VibeReading</h1><p>渐进阅读 · 卢曼卡片 · FSRS 间隔复习</p><p id="status">Starting…</p>
