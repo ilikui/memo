@@ -20,3 +20,10 @@
 - Reading documents, progress, and highlights are online-only; only selected notes/reviews use the current offline outbox.
 - No automated webpage extraction or PDF import/export yet.
 - The GitHub Actions test suite must pass on the release commit before a stable release is published.
+
+
+## Unreleased
+
+- Added a visible offline sync queue with pending/conflict counts and manual retry controls.
+- Added optimistic version checks for reading-document updates so stale offline edits cannot silently overwrite newer server content.
+- Added API coverage for stale reading-document update conflicts.
