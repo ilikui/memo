@@ -20,4 +20,6 @@ jobs:
       - name: Check PWA JavaScript syntax
         run: |
           node --input-type=module --check < web/app.js
+          node --check web/conflict-diff.js
           node --check web/sw.js
+          node --test tests/test_frontend_diff.mjs
