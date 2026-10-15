@@ -772,13 +772,35 @@ async function renderSyncQueue() {
           const response = await fetch("/api/documents/" + encodeURIComponent(op.entity_id));
           if (!response.ok) throw new Error("无法读取服务器版本（HTTP " + response.status + "）");
           const server = await response.json();
+          // Discard all queued full-document snapshots for this article, but preserve
+          // independent progress/highlight operations and replay them over server truth.
+          const remaining = (await getAll("outbox")).filter(item =>
+            item.entity_id === op.entity_id && item.operation_id !== op.operation_id
+          );
+          const documentEdits = remaining.filter(item => item.entity_type === "reading_document_update");
+          for (const edit of documentEdits) {
+            await transact("outbox", "readwrite", store => store.delete(edit.operation_id));
+          }
           await transact("outbox", "readwrite", store => store.delete(op.operation_id));
           const cached = await getById("readingDocuments", op.entity_id);
+          let progress = server.progress;
+          let highlights = server.highlights || [];
+          const remainingForDocument = remaining.filter(item =>
+            item.entity_type !== "reading_document_update"
+          ).sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+          for (const pending of remainingForDocument) {
+            if (pending.entity_type === "reading_progress") {
+              progress = { ...(progress || {}), ...pending.payload };
+            } else if (pending.entity_type === "reading_highlight_create") {
+              const highlight = { ...pending.payload, document_id: op.entity_id, pending_sync: true };
+              highlights = [...highlights.filter(item => item.id !== highlight.id), highlight];
+            }
+          }
           await transact("readingDocuments", "readwrite", store => store.put({
             ...(cached || {}), ...server, id: op.entity_id,
-            progress: cached?.progress || server.progress,
-            highlights: cached?.highlights || server.highlights || [],
-            pending_sync: false
+            progress,
+            highlights,
+            pending_sync: remainingForDocument.length > 0
           }));
           if (activeDocumentId === op.entity_id) {
             document.querySelector("#readingEditTitle").value = server.title || "";
