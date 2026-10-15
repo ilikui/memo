@@ -180,6 +180,40 @@ def test_stale_note_delete_returns_conflict():
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "NOTE_VERSION_CONFLICT"
 
+
+def test_knowledge_graph_reports_edges_and_orphans():
+    target = client.post("/api/notes", json={
+        "title": f"Graph target {uuid4().hex}",
+        "body_markdown": "Target node",
+    }).json()
+    source = client.post("/api/notes", json={
+        "title": f"Graph source {uuid4().hex}",
+        "body_markdown": f"Connect to [[{target['title']}]].",
+    }).json()
+    orphan = client.post("/api/notes", json={
+        "title": f"Orphan {uuid4().hex}",
+        "body_markdown": "No outgoing or incoming links",
+    }).json()
+
+    response = client.get("/api/notes/graph")
+    assert response.status_code == 200, response.text
+    graph = response.json()
+    assert graph["stats"]["notes"] >= 3
+    assert graph["stats"]["links"] >= 1
+    assert {"source": source["id"], "target": target["id"]} in graph["edges"]
+    assert orphan["id"] in graph["orphan_note_ids"]
+
+
+def test_flashcard_can_link_to_source_note():
+    note = client.post("/api/notes", json={"title": f"Flashcard source {uuid4().hex}"}).json()
+    response = client.post("/api/flashcards", json={
+        "front": "What is the key idea?",
+        "back": "The note's core idea.",
+        "source_note_id": note["id"],
+    })
+    assert response.status_code == 201, response.text
+    assert response.json()["source_note_id"] == note["id"]
+
 def test_note_validation_and_not_found():
     invalid = client.post("/api/notes", json={"title": "   ", "body_markdown": "content"})
     assert invalid.status_code == 422
