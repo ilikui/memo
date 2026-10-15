@@ -640,6 +640,31 @@ async function syncOutbox() {
         continue;
       }
 
+      if (operation.entity_type === "reading_document_update") {
+        response = await fetch("/api/documents/" + encodeURIComponent(operation.entity_id), {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(operation.payload)
+        });
+        if (response.ok) {
+          const saved = await response.json();
+          const cached = await getById("readingDocuments", operation.entity_id);
+          if (cached) await transact("readingDocuments", "readwrite", store => store.put({
+            ...cached, ...saved, ...operation.payload,
+            progress: cached.progress, highlights: cached.highlights || []
+          }));
+          await transact("outbox", "readwrite", store => store.delete(operation.operation_id));
+          statusEl.textContent = "离线文章修改已同步。";
+        } else if (response.status === 404) {
+          operation.status = "conflict";
+          operation.server_message = "文章已在服务器上删除；本地修改仍保留。";
+          await transact("outbox", "readwrite", store => store.put(operation));
+          statusEl.textContent = "文章修改冲突：服务器文章不存在，本地内容已保留。";
+        } else {
+          statusEl.textContent = "文章修改同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
+        }
+        continue;
+      }
+
       if (operation.entity_type === "reading_progress") {
         response = await fetch("/api/documents/" + encodeURIComponent(operation.entity_id) + "/progress", {
           method: "PUT", headers: { "Content-Type": "application/json" },
@@ -853,10 +878,7 @@ async function openReadingDocument(id) {
     activeDocumentTitle = item.title;
     activeDocumentUrl = item.source_url || "";
     document.querySelector("#readingEditor").hidden = false;
-    const offline = !navigator.onLine;
-    for (const selector of ["#readingEditTitle", "#readingEditUrl", "#readingBody", "#saveReadingDocument"]) {
-      document.querySelector(selector).disabled = offline;
-    }
+    updateReadingEditorAvailability();
     document.querySelector("#readingCurrentTitle").textContent = item.title;
     document.querySelector("#readingSource").textContent = item.source_url || "未设置原文链接";
     document.querySelector("#readingEditTitle").value = item.title;
@@ -919,27 +941,56 @@ async function saveReadingDocument() {
     statusEl.textContent = "文章标题不能为空。";
     return;
   }
+  const payload = { title, source_url, content_markdown };
+  const cached = await getById("readingDocuments", activeDocumentId);
+  const queueUpdate = async message => {
+    // Keep only the newest full-document snapshot; earlier snapshots are superseded.
+    const pending = (await getAll("outbox")).filter(op =>
+      op.entity_type === "reading_document_update" && op.entity_id === activeDocumentId
+    );
+    for (const op of pending) await transact("outbox", "readwrite", store => store.delete(op.operation_id));
+    const operation = {
+      operation_id: crypto.randomUUID(), entity_type: "reading_document_update",
+      entity_id: activeDocumentId, operation: "update", payload,
+      status: "pending", created_at: new Date().toISOString()
+    };
+    await transact("outbox", "readwrite", store => store.put(operation));
+    if (cached) await transact("readingDocuments", "readwrite", store => store.put({
+      ...cached, ...payload, id: activeDocumentId, pending_sync: true
+    }));
+    document.querySelector("#readingCurrentTitle").textContent = title;
+    document.querySelector("#readingSource").textContent = source_url || "未设置原文链接";
+    statusEl.textContent = message;
+    await loadReadingList();
+  };
+  if (!navigator.onLine) {
+    await queueUpdate("文章修改已保存到本机，联网后会自动同步。");
+    return;
+  }
   try {
     const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId), {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, source_url, content_markdown })
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
     });
-    if (!response.ok) throw new Error("save failed");
+    if (!response.ok) {
+      if (response.status >= 500) throw new Error("server unavailable");
+      statusEl.textContent = "保存正文失败（HTTP " + response.status + "）。";
+      return;
+    }
     const saved = await response.json();
-    const cached = await getById("readingDocuments", activeDocumentId);
+    const latest = await getById("readingDocuments", activeDocumentId);
     await transact("readingDocuments", "readwrite", store => store.put({
-      ...(cached || {}), ...saved,
-      id: activeDocumentId, title, source_url, content_markdown,
-      progress: cached?.progress || { status: "unread", progress_percent: 0, last_position: 0 },
-      highlights: cached?.highlights || []
+      ...(latest || {}), ...saved, ...payload,
+      id: activeDocumentId,
+      progress: latest?.progress || { status: "unread", progress_percent: 0, last_position: 0 },
+      highlights: latest?.highlights || []
     }));
     document.querySelector("#readingCurrentTitle").textContent = title;
     document.querySelector("#readingSource").textContent = source_url || "未设置原文链接";
     statusEl.textContent = "文章正文已保存。";
     await loadReadingList();
   } catch {
-    statusEl.textContent = "保存正文失败，请检查网络后重试。";
+    await queueUpdate("网络异常，文章修改已暂存本机，联网后会重试。");
   }
 }
 
@@ -1206,9 +1257,9 @@ async function createReadingHighlight() {
 function updateReadingEditorAvailability() {
   const editor = document.querySelector("#readingEditor");
   if (editor.hidden) return;
-  const offline = !navigator.onLine;
+  // Reading content, progress and highlight creation are locally editable offline.
   for (const selector of ["#readingEditTitle", "#readingEditUrl", "#readingStatus", "#readingProgress", "#readingBody", "#saveReadingDocument", "#saveReadingProgress", "#highlightQuote", "#highlightNote", "#captureSelection", "#saveHighlight"]) {
-    document.querySelector(selector).disabled = offline;
+    document.querySelector(selector).disabled = false;
   }
 }
 
@@ -1216,7 +1267,6 @@ window.addEventListener("online", async () => {
   statusEl.textContent = "网络已恢复。";
   updateReadingEditorAvailability();
   await Promise.all([loadNotes(), refresh(), loadReadingList()]);
-if (navigator.onLine) await syncOutbox();
   await syncOutbox();
 });
 window.addEventListener("offline", async () => {
