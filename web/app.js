@@ -55,7 +55,9 @@ async function applyPendingReadingOperations(documentRecord) {
     .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
   let merged = { ...documentRecord };
   for (const operation of operations) {
-    if (operation.entity_type === "reading_progress") {
+    if (operation.entity_type === "reading_document_update") {
+      merged = { ...merged, ...operation.payload, pending_sync: true };
+    } else if (operation.entity_type === "reading_progress") {
       merged.progress = { ...(merged.progress || {}), ...operation.payload };
     } else if (operation.entity_type === "reading_highlight_create") {
       const highlight = { ...operation.payload, document_id: operation.entity_id, pending_sync: true };
