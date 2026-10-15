@@ -1,0 +1,13 @@
+services:
+  vibereading:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////data/vibereading.db
+    volumes:
+      - vibereading_data:/data
+    restart: unless-stopped
+
+volumes:
+  vibereading_data:
