@@ -17,6 +17,7 @@
 | DELETE | `/api/notes/{id}?operation_id=...&expected_updated_at=...` | Delete a note with retry safety and stale-version detection |
 | GET | `/api/notes/{id}/links` | Parse `[[Title]]` references and resolve target notes by title |
 | GET | `/api/notes/{id}/backlinks` | Find notes that reference the target note title |
+| GET | `/api/notes/graph` | Return note nodes, resolved link edges and orphan-note IDs |
 
 Supported note types: `fleeting`, `literature`, `permanent`, `index`. Markdown is stored as text. Wiki-links support `[[Title]]`, aliases such as `[[Title|label]]`, and heading anchors such as `[[Title#section]]`. Link resolution currently uses exact case-insensitive note-title matching; backlinks are computed from note bodies at request time.
 
@@ -50,4 +51,4 @@ Ratings: 1=Again, 2=Hard, 3=Good, 4=Easy. `expected_version` enables optimistic 
 |---|---|---|
 | GET | `/api/sync/pull?cursor=0&limit=200` | Pull append-only event stream |
 
-The push/batch sync endpoint, authentication, per-user isolation, note backlinks, document/reading queue, Markdown/PDF import/export and production migrations are still pending.
+The push/batch sync endpoint, authentication, per-user isolation, document/reading queue, Markdown/PDF import/export and production migrations are still pending.
