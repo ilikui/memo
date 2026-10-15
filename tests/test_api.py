@@ -61,6 +61,7 @@ def test_markdown_note_create_search_and_update():
         "title": f"Updated {unique}",
         "body_markdown": "A revised Markdown body.",
         "note_type": "literature",
+        "expected_updated_at": note["updated_at"],
     })
     assert updated.status_code == 200, updated.text
     assert updated.json()["note_type"] == "literature"
@@ -69,6 +70,33 @@ def test_markdown_note_create_search_and_update():
     fetched = client.get(f"/api/notes/{note['id']}")
     assert fetched.status_code == 200
     assert fetched.json()["title"] == f"Updated {unique}"
+
+
+def test_note_create_is_idempotent_for_client_generated_id():
+    note_id = str(uuid4())
+    payload = {
+        "id": note_id,
+        "title": "Offline note",
+        "body_markdown": "Created while offline.",
+        "note_type": "permanent",
+    }
+    first = client.post("/api/notes", json=payload)
+    second = client.post("/api/notes", json=payload)
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["id"] == second.json()["id"] == note_id
+
+
+def test_stale_note_update_returns_conflict():
+    note = client.post("/api/notes", json={"title": "Conflict target"}).json()
+    response = client.put(f"/api/notes/{note['id']}", json={
+        "title": "Offline edit",
+        "body_markdown": "Local copy",
+        "note_type": "permanent",
+        "expected_updated_at": "2000-01-01T00:00:00+00:00",
+    })
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "NOTE_VERSION_CONFLICT"
 
 
 def test_note_validation_and_not_found():
