@@ -695,6 +695,8 @@ async function syncOutbox() {
   }
   await loadNotes();
   await refresh();
+  await loadReadingList();
+  if (activeDocumentId) await reloadHighlights();
 }
 
 document.querySelector("#noteSearch").addEventListener("input", renderNotes);
