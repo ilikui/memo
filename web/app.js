@@ -96,7 +96,10 @@ function renderNotes() {
       document.querySelector("#saveNote").textContent = "更新笔记";
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
-    row.append(title, meta, excerpt, edit);
+    const relationships = document.createElement("button");
+    relationships.textContent = "链接关系";
+    relationships.addEventListener("click", () => showNoteLinks(note.id));
+    row.append(title, meta, excerpt, edit, relationships);
     noteListEl.append(row);
   }
 }
@@ -125,6 +128,73 @@ async function loadNotes() {
   );
   pendingNoteOperations = (await getAll("outbox")).filter(op => op.entity_type === "note_mutation");
   renderNotes();
+}
+
+async function showNoteLinks(noteId) {
+  const panel = document.querySelector("#noteLinks");
+  panel.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = "笔记链接与反向引用";
+  panel.append(heading);
+  if (!navigator.onLine) {
+    const offline = document.createElement("p");
+    offline.textContent = "离线时暂时无法查询服务器端的链接关系。";
+    panel.append(offline);
+    return;
+  }
+  try {
+    const [linksResponse, backlinksResponse] = await Promise.all([
+      fetch("/api/notes/" + encodeURIComponent(noteId) + "/links"),
+      fetch("/api/notes/" + encodeURIComponent(noteId) + "/backlinks")
+    ]);
+    if (!linksResponse.ok || !backlinksResponse.ok) throw new Error("Unable to load links");
+    const [linksData, backlinksData] = await Promise.all([linksResponse.json(), backlinksResponse.json()]);
+    const outgoingTitle = document.createElement("h4");
+    outgoingTitle.textContent = "正文中引用的笔记";
+    panel.append(outgoingTitle);
+    if (!linksData.links.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "没有发现 [[双向链接]]。";
+      panel.append(empty);
+    }
+    for (const link of linksData.links) {
+      const line = document.createElement("p");
+      line.textContent = (link.resolved ? "✓ " : "? ") + link.title + (link.resolved ? "（已解析）" : "（未找到目标笔记）");
+      panel.append(line);
+    }
+    const incomingTitle = document.createElement("h4");
+    incomingTitle.textContent = "反向引用";
+    panel.append(incomingTitle);
+    if (!backlinksData.backlinks.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "还没有其他笔记引用这条笔记。";
+      panel.append(empty);
+    }
+    for (const backlink of backlinksData.backlinks) {
+      const line = document.createElement("p");
+      line.textContent = backlink.title + " · " + backlink.note_type;
+      const open = document.createElement("button");
+      open.textContent = "打开";
+      open.addEventListener("click", async () => {
+        const response = await fetch("/api/notes/" + encodeURIComponent(backlink.id));
+        if (!response.ok) return;
+        const note = await response.json();
+        editingNoteId = note.id;
+        document.querySelector("#noteTitle").value = note.title;
+        document.querySelector("#noteBody").value = note.body_markdown;
+        document.querySelector("#noteType").value = note.note_type;
+        document.querySelector("#noteEditing").textContent = "正在编辑：" + note.title;
+        document.querySelector("#saveNote").textContent = "更新笔记";
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+      line.append(open);
+      panel.append(line);
+    }
+  } catch {
+    const error = document.createElement("p");
+    error.textContent = "加载链接关系失败，请稍后重试。";
+    panel.append(error);
+  }
 }
 
 function resetNoteEditor() {
