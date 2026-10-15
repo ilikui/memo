@@ -14,6 +14,7 @@
 | GET | `/api/notes?q=term&note_type=permanent&limit=100` | Search note title/body and filter by type |
 | GET | `/api/notes/{id}` | Read one note |
 | PUT | `/api/notes/{id}` | Update a note with optional `operation_id` and `expected_updated_at` |
+| DELETE | `/api/notes/{id}?operation_id=...&expected_updated_at=...` | Delete a note with retry safety and stale-version detection |
 | GET | `/api/notes/{id}/links` | Parse `[[Title]]` references and resolve target notes by title |
 | GET | `/api/notes/{id}/backlinks` | Find notes that reference the target note title |
 
