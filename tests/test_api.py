@@ -269,6 +269,34 @@ def test_progressive_reading_document_progress_and_highlights():
     assert client.get(f"/api/documents/{document['id']}/highlights").json() == []
 
 
+
+def test_reading_highlight_client_id_is_idempotent_and_conflicts_on_payload_change():
+    created = client.post("/api/documents", json={
+        "title": f"Idempotent highlight {uuid4().hex}",
+        "content_markdown": "Offline reading test",
+    })
+    assert created.status_code == 201, created.text
+    document_id = created.json()["id"]
+    highlight_id = str(uuid4())
+    payload = {
+        "id": highlight_id,
+        "quote_text": "Offline reading test",
+        "note": "Saved while offline",
+        "position_start": 0,
+        "position_end": 20,
+    }
+    first = client.post(f"/api/documents/{document_id}/highlights", json=payload)
+    assert first.status_code == 201, first.text
+    second = client.post(f"/api/documents/{document_id}/highlights", json=payload)
+    assert second.status_code == 201, second.text
+    assert second.json()["id"] == first.json()["id"]
+    assert len(client.get(f"/api/documents/{document_id}/highlights").json()) == 1
+
+    changed = {**payload, "note": "Different payload"}
+    conflict = client.post(f"/api/documents/{document_id}/highlights", json=changed)
+    assert conflict.status_code == 409, conflict.text
+
+
 def test_progressive_reading_validation_and_missing_document():
     invalid_url = client.post("/api/documents", json={
         "title": "Invalid source URL", "source_url": "javascript:alert(1)",
