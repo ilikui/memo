@@ -30,7 +30,7 @@ GitHub Actions runs the Python test suite and JavaScript syntax checks on pushes
 - Progressive-reading workspace: create a reading queue entry with an optional source URL and pasted Markdown/text, update the article body, track unread/reading/completed status and percentage, and save/delete quoted highlights with personal annotations.
 - Markdown note create/read/update/delete API, title/body search, note types and a browser editor.
 - Wiki-links with aliases and heading anchors, backlink lookup, a clickable knowledge graph and orphan-note detection.
-- Create FSRS flashcards directly from a note; cards retain the source note relationship.
+- Create FSRS flashcards directly from a note; cards retain the source note relationship. Reading highlights can generate stable-ID literature notes, linked permanent notes, and flashcards attached to the permanent note; repeated conversions reuse the same note IDs and skip an existing linked flashcard.
 - Offline note create/update operations are stored in IndexedDB and retried automatically after reconnect.
 - Stable client-generated note IDs make offline creation retry-safe; operation IDs make note-update retries idempotent.
 - Optimistic timestamp checks detect edits made on another device; conflicts preserve the local copy until the user resolves them.
