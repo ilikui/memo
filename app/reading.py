@@ -3,7 +3,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .db import get_db
@@ -95,8 +95,8 @@ def list_documents(
             "progress_percent": 0, "last_position": 0, "updated_at": document.updated_at,
         }
         item["highlight_count"] = db.scalar(
-            select(ReadingHighlight.id).where(ReadingHighlight.document_id == document.id)
-        ) is not None
+            select(func.count(ReadingHighlight.id)).where(ReadingHighlight.document_id == document.id)
+        ) or 0
         result.append(item)
     return result
 
