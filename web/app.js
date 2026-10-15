@@ -900,7 +900,7 @@ async function convertHighlightToKnowledge(highlight, createCard) {
     const noteResponse = await fetch("/api/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: noteTitle, body_markdown: noteBody, note_type: "permanent", document_id: activeDocumentId })
+      body: JSON.stringify({ id: highlight.id, title: noteTitle, body_markdown: noteBody, note_type: "permanent", document_id: activeDocumentId })
     });
     if (!noteResponse.ok) {
       statusEl.textContent = "创建永久笔记失败（HTTP " + noteResponse.status + "）。";
@@ -908,6 +908,19 @@ async function convertHighlightToKnowledge(highlight, createCard) {
     }
     const note = await noteResponse.json();
     if (createCard) {
+      const existingCardsResponse = await fetch("/api/flashcards?limit=500");
+      if (!existingCardsResponse.ok) {
+        statusEl.textContent = "永久笔记已保存，但无法检查是否已有闪卡；请稍后重试。";
+        await loadNotes();
+        return;
+      }
+      const existingCards = await existingCardsResponse.json();
+      if (existingCards.some(card => card.source_note_id === note.id)) {
+        statusEl.textContent = "这条摘录已经关联闪卡了，已跳过重复创建。";
+        await loadNotes();
+        await refresh();
+        return;
+      }
       const front = prompt("闪卡正面：把摘录转成一个值得回忆的问题", "这段摘录的核心观点是什么？");
       if (front === null) return;
       const back = prompt("闪卡背面：用自己的话概括答案", highlight.note || highlight.quote_text);
