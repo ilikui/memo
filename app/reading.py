@@ -32,6 +32,7 @@ class ProgressUpdate(BaseModel):
 
 
 class HighlightCreate(BaseModel):
+    id: str | None = Field(default=None, min_length=1, max_length=36)
     quote_text: str = Field(min_length=1, max_length=20000)
     note: str = Field(default="", max_length=20000)
     position_start: int | None = Field(default=None, ge=0)
@@ -203,7 +204,26 @@ def create_highlight(document_id: str, body: HighlightCreate, db: Session = Depe
         raise HTTPException(status_code=422, detail="quote_text must not be blank")
     if body.position_start is not None and body.position_end is not None and body.position_end < body.position_start:
         raise HTTPException(status_code=422, detail="position_end must be >= position_start")
+    if body.id:
+        existing = db.get(ReadingHighlight, body.id)
+        if existing:
+            same_payload = (
+                existing.document_id == document_id
+                and existing.quote_text == quote
+                and existing.note == body.note
+                and existing.position_start == body.position_start
+                and existing.position_end == body.position_end
+            )
+            if same_payload:
+                return {
+                    "id": existing.id, "document_id": existing.document_id,
+                    "quote_text": existing.quote_text, "note": existing.note,
+                    "position_start": existing.position_start, "position_end": existing.position_end,
+                    "created_at": existing.created_at,
+                }
+            raise HTTPException(status_code=409, detail="Highlight ID already exists with different content")
     highlight = ReadingHighlight(
+        **({"id": body.id} if body.id else {}),
         document_id=document_id, quote_text=quote, note=body.note,
         position_start=body.position_start, position_end=body.position_end,
     )
