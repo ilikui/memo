@@ -36,6 +36,36 @@ textarea{min-height:180px;font:inherit}
 <button id="saveNote">保存笔记</button><button id="newNote">新建 / 清空</button>
 <div id="noteLinks" class="muted" aria-live="polite"></div>
 </section>
+
+<section class="card" id="readingWorkspace">
+<h2>渐进阅读</h2>
+<p class="muted">保存文章链接并粘贴正文 Markdown；可记录阅读进度、摘录重点和写下自己的思考。当前不自动抓取网页。</p>
+<div id="readingList">加载阅读清单中…</div>
+<hr>
+<h3>添加阅读材料</h3>
+<input id="readingTitle" placeholder="文章标题">
+<input id="readingUrl" placeholder="原文链接（可选，http/https）">
+<textarea id="readingContent" placeholder="粘贴文章正文或 Markdown 内容…"></textarea>
+<button id="createDocument">加入阅读清单</button>
+<div id="readingEditor" hidden>
+<hr>
+<h3 id="readingCurrentTitle">正在阅读</h3>
+<p id="readingSource" class="muted"></p>
+<label for="readingStatus">阅读状态</label>
+<select id="readingStatus"><option value="unread">未开始</option><option value="reading">阅读中</option><option value="completed">已完成</option></select>
+<label for="readingProgress">阅读进度：<span id="readingProgressLabel">0%</span></label>
+<input id="readingProgress" type="range" min="0" max="100" value="0">
+<textarea id="readingBody" placeholder="文章正文 Markdown…"></textarea>
+<button id="saveReadingDocument">保存正文</button><button id="saveReadingProgress">保存进度</button>
+<h4>重点摘录</h4>
+<p class="muted">在正文框中选中一段文字，再点“摘录选中文本”，也可以手动输入摘录。</p>
+<textarea id="highlightQuote" placeholder="摘录原文（可从正文选中后自动填入）"></textarea>
+<textarea id="highlightNote" placeholder="我的思考 / 批注（可选）"></textarea>
+<button id="captureSelection">摘录选中文本</button><button id="saveHighlight">保存摘录</button>
+<div id="highlightList"></div>
+</div>
+</section>
+
 <section class="card"><h2>创建闪卡</h2>
 <input id="front" placeholder="正面：问题或提示"><textarea id="back" placeholder="背面：答案或解释"></textarea>
 <button id="create">保存闪卡</button><button id="refresh">刷新闪卡</button></section>
