@@ -116,6 +116,39 @@ def test_note_update_retry_is_idempotent():
     assert second.status_code == 200, second.text
     assert second.json()["title"] == "Updated exactly once"
 
+
+def test_wikilinks_and_backlinks_resolve_by_title():
+    target = client.post("/api/notes", json={
+        "title": f"Target {uuid4().hex}",
+        "body_markdown": "Target body",
+    }).json()
+    source = client.post("/api/notes", json={
+        "title": f"Source {uuid4().hex}",
+        "body_markdown": (
+            f"See [[{target['title']}]] and [[{target['title']}|friendly alias]]. "
+            "Also see [[Missing Note]] and [[Missing Note#section]]."
+        ),
+    }).json()
+
+    links_response = client.get(f"/api/notes/{source['id']}/links")
+    assert links_response.status_code == 200
+    links = links_response.json()["links"]
+    assert len(links) == 2
+    resolved = next(item for item in links if item["title"] == target["title"])
+    unresolved = next(item for item in links if item["title"] == "Missing Note")
+    assert resolved["resolved"] is True
+    assert resolved["note_id"] == target["id"]
+    assert unresolved["resolved"] is False
+
+    backlinks_response = client.get(f"/api/notes/{target['id']}/backlinks")
+    assert backlinks_response.status_code == 200
+    assert any(item["id"] == source["id"] for item in backlinks_response.json()["backlinks"])
+
+
+def test_wikilink_endpoints_return_404_for_missing_note():
+    assert client.get("/api/notes/missing-note/links").status_code == 404
+    assert client.get("/api/notes/missing-note/backlinks").status_code == 404
+
 def test_note_validation_and_not_found():
     invalid = client.post("/api/notes", json={"title": "   ", "body_markdown": "content"})
     assert invalid.status_code == 422
