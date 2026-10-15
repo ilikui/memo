@@ -27,7 +27,9 @@ GitHub Actions runs the Python test suite and JavaScript syntax checks on pushes
 ## Current MVP
 
 - FastAPI + SQLAlchemy models for documents, Markdown notes, flashcards, review logs and sync events.
-- Markdown note create/read/update API, title/body search, note types and a browser editor.
+- Markdown note create/read/update/delete API, title/body search, note types and a browser editor.
+- Wiki-links with aliases and heading anchors, backlink lookup, a clickable knowledge graph and orphan-note detection.
+- Create FSRS flashcards directly from a note; cards retain the source note relationship.
 - Offline note create/update operations are stored in IndexedDB and retried automatically after reconnect.
 - Stable client-generated note IDs make offline creation retry-safe; operation IDs make note-update retries idempotent.
 - Optimistic timestamp checks detect edits made on another device; conflicts preserve the local copy until the user resolves them.
@@ -39,6 +41,6 @@ GitHub Actions runs the Python test suite and JavaScript syntax checks on pushes
 
 ## Important limitations
 
-This is an initial starter, not production-ready multi-user software. Offline note creation and editing are queued locally, but note deletion and cross-device automatic merge are not implemented; conflicts require a manual decision. Offline reviews are queued locally, but the browser does not calculate a new FSRS schedule until the server accepts the review. The sync push/batch endpoint, note backlinks, document/reading queue, Markdown/PDF import/export and full incremental-reading flow are not implemented. Before public deployment, add authentication and per-user row isolation, Alembic migrations, PostgreSQL configuration, HTTPS, request limits, monitoring, backup/restore and a complete multi-device conflict policy. SQLite is for local development only.
+This is an initial starter, not production-ready multi-user software. Offline note creation and editing are queued locally, but note deletion and cross-device automatic merge are not implemented; conflicts require a manual decision. Offline reviews are queued locally, but the browser does not calculate a new FSRS schedule until the server accepts the review. The sync push/batch endpoint, document/reading queue, Markdown/PDF import/export and full incremental-reading flow are not implemented. Before public deployment, add authentication and per-user row isolation, Alembic migrations, PostgreSQL configuration, HTTPS, request limits, monitoring, backup/restore and a complete multi-device conflict policy. SQLite is for local development only.
 
 Never commit private PDFs, secrets or personal reading data to a public repository.
