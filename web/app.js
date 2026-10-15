@@ -623,6 +623,49 @@ async function syncOutbox() {
         continue;
       }
 
+      if (operation.entity_type === "reading_progress") {
+        response = await fetch("/api/documents/" + encodeURIComponent(operation.entity_id) + "/progress", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(operation.payload)
+        });
+        if (response.ok) {
+          const savedProgress = await response.json();
+          const cached = await getById("readingDocuments", operation.entity_id);
+          if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, progress: savedProgress }));
+          await transact("outbox", "readwrite", store => store.delete(operation.operation_id));
+          statusEl.textContent = "离线阅读进度已同步。";
+        } else {
+          statusEl.textContent = "阅读进度同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
+        }
+        continue;
+      }
+
+      if (operation.entity_type === "reading_highlight_create") {
+        response = await fetch("/api/documents/" + encodeURIComponent(operation.entity_id) + "/highlights", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(operation.payload)
+        });
+        if (response.ok) {
+          const savedHighlight = await response.json();
+          const cached = await getById("readingDocuments", operation.entity_id);
+          if (cached) {
+            const highlights = cached.highlights || [];
+            const merged = [...highlights.filter(item => item.id !== savedHighlight.id), savedHighlight];
+            await transact("readingDocuments", "readwrite", store => store.put({ ...cached, highlights: merged }));
+          }
+          await transact("outbox", "readwrite", store => store.delete(operation.operation_id));
+          statusEl.textContent = "离线摘录已同步。";
+        } else if (response.status === 409) {
+          operation.status = "conflict";
+          operation.server_message = "同一摘录 ID 对应不同内容；本地数据已保留。";
+          await transact("outbox", "readwrite", store => store.put(operation));
+          statusEl.textContent = "摘录同步冲突：本地操作已保留，请检查。";
+        } else {
+          statusEl.textContent = "摘录同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
+        }
+        continue;
+      }
+
       if (operation.entity_type !== "flashcard_review") continue;
       response = await fetch("/api/flashcards/" + encodeURIComponent(operation.entity_id) + "/review", {
         method: "POST",
@@ -788,7 +831,7 @@ async function openReadingDocument(id) {
     activeDocumentUrl = item.source_url || "";
     document.querySelector("#readingEditor").hidden = false;
     const offline = !navigator.onLine;
-    for (const selector of ["#readingEditTitle", "#readingEditUrl", "#readingStatus", "#readingProgress", "#readingBody", "#saveReadingDocument", "#saveReadingProgress", "#highlightQuote", "#highlightNote", "#captureSelection", "#saveHighlight"]) {
+    for (const selector of ["#readingEditTitle", "#readingEditUrl", "#readingBody", "#saveReadingDocument"]) {
       document.querySelector(selector).disabled = offline;
     }
     document.querySelector("#readingCurrentTitle").textContent = item.title;
@@ -879,26 +922,42 @@ async function saveReadingDocument() {
 
 async function saveReadingProgress() {
   if (!activeDocumentId) return;
-  const progress_percent = Number(document.querySelector("#readingProgress").value);
-  const status = document.querySelector("#readingStatus").value;
+  const payload = {
+    status: document.querySelector("#readingStatus").value,
+    progress_percent: Number(document.querySelector("#readingProgress").value),
+    last_position: document.querySelector("#readingBody").selectionStart || 0
+  };
+  const cached = await getById("readingDocuments", activeDocumentId);
+  if (!navigator.onLine) {
+    const operation = {
+      operation_id: crypto.randomUUID(), entity_type: "reading_progress",
+      entity_id: activeDocumentId, operation: "update",
+      payload, status: "pending", created_at: new Date().toISOString()
+    };
+    await transact("outbox", "readwrite", store => store.put(operation));
+    if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, progress: { ...payload } }));
+    statusEl.textContent = "阅读进度已保存到本机，联网后会自动同步。";
+    await loadReadingList();
+    return;
+  }
   try {
     const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/progress", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, progress_percent, last_position: document.querySelector("#readingBody").selectionStart || 0 })
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
     });
     if (!response.ok) throw new Error("progress save failed");
     const savedProgress = await response.json();
-    const cached = await getById("readingDocuments", activeDocumentId);
-    if (cached) {
-      await transact("readingDocuments", "readwrite", store => store.put({
-        ...cached, progress: savedProgress
-      }));
-    }
+    if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, progress: savedProgress }));
     statusEl.textContent = "阅读进度已保存。";
     await loadReadingList();
   } catch {
-    statusEl.textContent = "保存阅读进度失败，请稍后重试。";
+    const operation = {
+      operation_id: crypto.randomUUID(), entity_type: "reading_progress",
+      entity_id: activeDocumentId, operation: "update",
+      payload, status: "pending", created_at: new Date().toISOString()
+    };
+    await transact("outbox", "readwrite", store => store.put(operation));
+    if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, progress: { ...payload } }));
+    statusEl.textContent = "网络暂不可用，阅读进度已暂存本机，联网后会重试。";
   }
 }
 
@@ -1051,15 +1110,40 @@ async function createReadingHighlight() {
     statusEl.textContent = "请填写要保存的摘录。";
     return;
   }
+  const payload = {
+    id: crypto.randomUUID(), quote_text, note,
+    position_start: activeSelectionStart, position_end: activeSelectionEnd
+  };
+  const cached = await getById("readingDocuments", activeDocumentId);
+  if (!navigator.onLine) {
+    const operation = {
+      operation_id: crypto.randomUUID(), entity_type: "reading_highlight_create",
+      entity_id: activeDocumentId, operation: "create",
+      payload, status: "pending", created_at: new Date().toISOString()
+    };
+    await transact("outbox", "readwrite", store => store.put(operation));
+    const highlights = [...(cached?.highlights || []), { ...payload, document_id: activeDocumentId, pending_sync: true }];
+    if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, highlights }));
+    renderHighlights(highlights);
+    document.querySelector("#highlightQuote").value = "";
+    document.querySelector("#highlightNote").value = "";
+    statusEl.textContent = "摘录已保存到本机，联网后会自动同步。";
+    return;
+  }
   try {
     const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/highlights", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ quote_text, note, position_start: activeSelectionStart, position_end: activeSelectionEnd })
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload)
     });
     if (!response.ok) {
+      if (response.status >= 500) throw new Error("server unavailable");
       statusEl.textContent = "保存摘录失败（HTTP " + response.status + "）。";
       return;
+    }
+    const saved = await response.json();
+    const updatedCache = await getById("readingDocuments", activeDocumentId);
+    if (updatedCache) {
+      const highlights = [...(updatedCache.highlights || []).filter(item => item.id !== saved.id), saved];
+      await transact("readingDocuments", "readwrite", store => store.put({ ...updatedCache, highlights }));
     }
     document.querySelector("#highlightQuote").value = "";
     document.querySelector("#highlightNote").value = "";
@@ -1067,7 +1151,18 @@ async function createReadingHighlight() {
     statusEl.textContent = "摘录已保存。";
     await loadReadingList();
   } catch {
-    statusEl.textContent = "无法连接服务器，摘录尚未保存。";
+    const operation = {
+      operation_id: crypto.randomUUID(), entity_type: "reading_highlight_create",
+      entity_id: activeDocumentId, operation: "create",
+      payload, status: "pending", created_at: new Date().toISOString()
+    };
+    await transact("outbox", "readwrite", store => store.put(operation));
+    const highlights = [...(cached?.highlights || []), { ...payload, document_id: activeDocumentId, pending_sync: true }];
+    if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, highlights }));
+    renderHighlights(highlights);
+    document.querySelector("#highlightQuote").value = "";
+    document.querySelector("#highlightNote").value = "";
+    statusEl.textContent = "网络异常，摘录已暂存本机，联网后会重试。";
   }
 }
 
