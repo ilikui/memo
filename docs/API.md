@@ -10,22 +10,25 @@
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/notes` | Create a Markdown note |
+| POST | `/api/notes` | Create a Markdown note; accepts optional client-generated `id` for offline retries |
 | GET | `/api/notes?q=term&note_type=permanent&limit=100` | Search note title/body and filter by type |
 | GET | `/api/notes/{id}` | Read one note |
-| PUT | `/api/notes/{id}` | Replace note fields |
+| PUT | `/api/notes/{id}` | Update a note with optional `operation_id` and `expected_updated_at` |
 
 Supported note types: `fleeting`, `literature`, `permanent`, `index`. Markdown is stored as text; rendering and backlink extraction are not implemented yet.
 
-Example:
+Example create payload:
 
 ```json
 {
+  "id": "optional-client-generated-uuid",
   "title": "One idea per note",
   "body_markdown": "## Principle\n\nA permanent note should express one idea.",
   "note_type": "permanent"
 }
 ```
+
+For offline synchronization, the client generates a stable note ID before saving locally. Repeating the same create request returns the existing note; reusing the ID with different content returns HTTP 409. Updates may send `expected_updated_at` to detect stale copies and a unique `operation_id` to make network retries idempotent. A stale update returns HTTP 409 with code `NOTE_VERSION_CONFLICT`.
 
 ## Flashcards and reviews
 
