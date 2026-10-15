@@ -1050,6 +1050,27 @@ async function createReadingHighlight() {
   }
 }
 
+function updateReadingEditorAvailability() {
+  const editor = document.querySelector("#readingEditor");
+  if (editor.hidden) return;
+  const offline = !navigator.onLine;
+  for (const selector of ["#readingEditTitle", "#readingEditUrl", "#readingStatus", "#readingProgress", "#readingBody", "#saveReadingDocument", "#saveReadingProgress", "#highlightQuote", "#highlightNote", "#captureSelection", "#saveHighlight"]) {
+    document.querySelector(selector).disabled = offline;
+  }
+}
+
+window.addEventListener("online", async () => {
+  statusEl.textContent = "网络已恢复。";
+  updateReadingEditorAvailability();
+  await Promise.all([loadNotes(), refresh(), loadReadingList()]);
+  await syncOutbox();
+});
+window.addEventListener("offline", async () => {
+  statusEl.textContent = "当前离线：阅读正文可使用本机缓存。";
+  updateReadingEditorAvailability();
+  await loadReadingList();
+});
+
 document.querySelector("#createDocument").addEventListener("click", createReadingDocument);
 document.querySelector("#saveReadingDocument").addEventListener("click", saveReadingDocument);
 document.querySelector("#saveReadingProgress").addEventListener("click", saveReadingProgress);
