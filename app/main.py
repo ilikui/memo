@@ -207,6 +207,46 @@ def get_note_backlinks(note_id: str, db: Session = Depends(get_db)):
     return {"note_id": note.id, "backlinks": backlinks}
 
 
+@app.delete("/api/notes/{note_id}")
+def delete_note(
+    note_id: str,
+    operation_id: str = Query(..., min_length=8, max_length=100),
+    expected_updated_at: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    prior_event = db.scalar(select(SyncEvent).where(SyncEvent.event_id == operation_id))
+    if prior_event and prior_event.entity_type == "note" and prior_event.entity_id == note_id:
+        return {"id": note_id, "deleted": True, "duplicate": True}
+    note = db.get(Note, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if expected_updated_at is not None:
+        actual = note.updated_at
+        expected = expected_updated_at
+        if actual.tzinfo is None:
+            actual = actual.replace(tzinfo=timezone.utc)
+        if expected.tzinfo is None:
+            expected = expected.replace(tzinfo=timezone.utc)
+        if abs(actual.timestamp() - expected.timestamp()) > 0.001:
+            raise HTTPException(status_code=409, detail={
+                "code": "NOTE_VERSION_CONFLICT",
+                "message": "This note changed on the server. Keep the local copy and resolve the conflict.",
+                "server_updated_at": note.updated_at.isoformat(),
+            })
+    snapshot = {
+        "id": note.id,
+        "title": note.title,
+        "body_markdown": note.body_markdown,
+        "note_type": note.note_type,
+        "document_id": note.document_id,
+        "updated_at": note.updated_at.isoformat(),
+    }
+    db.delete(note)
+    append_event(db, operation_id, "note", note_id, "delete", snapshot)
+    db.commit()
+    return {"id": note_id, "deleted": True, "duplicate": False}
+
+
 @app.post("/api/flashcards", response_model=FlashcardOut, status_code=201)
 def create_flashcard(body: FlashcardCreate, db: Session = Depends(get_db)):
     if body.source_note_id and not db.get(Note, body.source_note_id):
