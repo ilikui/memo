@@ -34,6 +34,21 @@ Example create payload:
 
 For offline synchronization, the client generates a stable note ID before saving locally. Repeating the same create request returns the existing note; reusing the ID with different content returns HTTP 409. Updates may send `expected_updated_at` to detect stale copies and a unique `operation_id` to make network retries idempotent. A stale update returns HTTP 409 with code `NOTE_VERSION_CONFLICT`.
 
+## Progressive reading
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/documents` | Create a reading item with title, optional http/https source URL and pasted Markdown/text |
+| GET | `/api/documents?status=reading&limit=100` | List reading items with progress and highlight count |
+| GET | `/api/documents/{id}` | Read article body, progress and highlights |
+| PUT | `/api/documents/{id}` | Update title, source URL or Markdown body |
+| PUT | `/api/documents/{id}/progress` | Update status (`unread`, `reading`, `completed`), percentage (0–100) and last position |
+| GET | `/api/documents/{id}/highlights` | List saved quotations and annotations |
+| POST | `/api/documents/{id}/highlights` | Save a quote, optional note and optional character offsets |
+| DELETE | `/api/documents/{id}/highlights/{highlight_id}` | Delete a saved highlight |
+
+The PWA reading workspace supports manually pasting article text/Markdown, saving the source URL as metadata, resuming from the reading list, updating progress and recording highlights. It deliberately does not fetch arbitrary URLs yet; this avoids unsafe server-side URL fetching and keeps import behavior explicit. Reading data is currently online-only and is not part of the IndexedDB sync outbox.
+
 ## Flashcards and reviews
 
 | Method | Path | Purpose |
