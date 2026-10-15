@@ -48,6 +48,23 @@ async function getById(name, id) {
   });
 }
 
+async function applyPendingReadingOperations(documentRecord) {
+  if (!documentRecord) return documentRecord;
+  const operations = (await getAll("outbox"))
+    .filter(op => op.entity_id === documentRecord.id && op.status !== "conflict")
+    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  let merged = { ...documentRecord };
+  for (const operation of operations) {
+    if (operation.entity_type === "reading_progress") {
+      merged.progress = { ...(merged.progress || {}), ...operation.payload };
+    } else if (operation.entity_type === "reading_highlight_create") {
+      const highlight = { ...operation.payload, document_id: operation.entity_id, pending_sync: true };
+      merged.highlights = [...(merged.highlights || []).filter(item => item.id !== highlight.id), highlight];
+    }
+  }
+  return merged;
+}
+
 function getPendingNoteOperation(noteId) {
   // The renderer is synchronous; the most recent in-memory list is refreshed on each load.
   return pendingNoteOperations.find(op => op.entity_id === noteId) || null;
@@ -764,6 +781,9 @@ async function loadReadingList() {
       const response = await fetch("/api/documents?limit=500");
       if (!response.ok) throw new Error("Unable to load reading queue");
       documents = await response.json();
+      for (let i = 0; i < documents.length; i++) {
+        documents[i] = await applyPendingReadingOperations(documents[i]);
+      }
       for (const item of documents) {
         const cached = await getById("readingDocuments", item.id);
         // Do not replace a full cached document with the shorter list summary.
@@ -817,6 +837,7 @@ async function openReadingDocument(id) {
         const response = await fetch("/api/documents/" + encodeURIComponent(id));
         if (!response.ok) throw new Error("Document not found");
         item = await response.json();
+        item = await applyPendingReadingOperations(item);
         await transact("readingDocuments", "readwrite", store => store.put(item));
       } catch {
         item = await getById("readingDocuments", id);
@@ -1185,6 +1206,7 @@ window.addEventListener("online", async () => {
   statusEl.textContent = "网络已恢复。";
   updateReadingEditorAvailability();
   await Promise.all([loadNotes(), refresh(), loadReadingList()]);
+if (navigator.onLine) await syncOutbox();
   await syncOutbox();
 });
 window.addEventListener("offline", async () => {
