@@ -695,6 +695,8 @@ if ("serviceWorker" in navigator) {
 
 
 let activeDocumentId = null;
+let activeSelectionStart = null;
+let activeSelectionEnd = null;
 
 async function loadReadingList() {
   const list = document.querySelector("#readingList");
@@ -743,6 +745,10 @@ async function openReadingDocument(id) {
     document.querySelector("#readingEditTitle").value = item.title;
     document.querySelector("#readingEditUrl").value = item.source_url || "";
     document.querySelector("#readingBody").value = item.content_markdown || "";
+    const resumePosition = Math.min(item.progress.last_position || 0, document.querySelector("#readingBody").value.length);
+    document.querySelector("#readingBody").setSelectionRange(resumePosition, resumePosition);
+    activeSelectionStart = null;
+    activeSelectionEnd = null;
     document.querySelector("#readingStatus").value = item.progress.status;
     document.querySelector("#readingProgress").value = item.progress.progress_percent;
     document.querySelector("#readingProgressLabel").textContent = item.progress.progress_percent + "%";
@@ -820,7 +826,7 @@ async function saveReadingProgress() {
     const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/progress", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, progress_percent })
+      body: JSON.stringify({ status, progress_percent, last_position: document.querySelector("#readingBody").selectionStart || 0 })
     });
     if (!response.ok) throw new Error("progress save failed");
     statusEl.textContent = "阅读进度已保存。";
@@ -885,7 +891,7 @@ async function createReadingHighlight() {
     const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/highlights", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ quote_text, note })
+      body: JSON.stringify({ quote_text, note, position_start: activeSelectionStart, position_end: activeSelectionEnd })
     });
     if (!response.ok) {
       statusEl.textContent = "保存摘录失败（HTTP " + response.status + "）。";
@@ -916,6 +922,8 @@ document.querySelector("#captureSelection").addEventListener("click", () => {
     return;
   }
   document.querySelector("#highlightQuote").value = selection;
+  activeSelectionStart = body.selectionStart;
+  activeSelectionEnd = body.selectionEnd;
 });
 document.querySelector("#readingStatus").addEventListener("change", event => {
   if (event.target.value === "completed") {
