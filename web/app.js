@@ -629,22 +629,26 @@ async function renderSyncQueue() {
       name.textContent = "文章：" + op.payload.title;
       row.append(name);
     }
-    const retry = document.createElement("button");
-    retry.textContent = op.status === "conflict" ? "重新尝试" : "立即重试";
-    retry.disabled = !navigator.onLine;
-    retry.addEventListener("click", async () => {
-      if (op.status === "conflict" && !confirm("重新尝试可能再次遇到版本冲突。是否继续？")) return;
-      op.status = "pending";
-      delete op.server_message;
-      await transact("outbox", "readwrite", store => store.put(op));
-      await renderSyncQueue();
-      await syncOutbox();
-    });
-    row.append(retry);
+    const isReadingConflict = op.status === "conflict" && op.entity_type === "reading_document_update";
+    if (!isReadingConflict) {
+      const retry = document.createElement("button");
+      retry.textContent = op.status === "conflict" ? "重新尝试" : "立即重试";
+      retry.disabled = !navigator.onLine;
+      retry.addEventListener("click", async () => {
+        if (op.status === "conflict" && !confirm("重新尝试可能再次遇到版本冲突。是否继续？")) return;
+        op.status = "pending";
+        delete op.server_message;
+        await transact("outbox", "readwrite", store => store.put(op));
+        await renderSyncQueue();
+        await syncOutbox();
+      });
+      row.append(retry);
+    }
 
-    if (op.status === "conflict" && op.entity_type === "reading_document_update") {
+    if (isReadingConflict) {
       const compareButton = document.createElement("button");
       compareButton.textContent = "比较本地与服务器版本";
+      compareButton.disabled = !navigator.onLine;
       const comparison = document.createElement("pre");
       comparison.className = "answer";
       comparison.hidden = true;
@@ -679,6 +683,7 @@ async function renderSyncQueue() {
       });
       const keepLocal = document.createElement("button");
       keepLocal.textContent = "保留本地版本并覆盖服务器";
+      keepLocal.disabled = !navigator.onLine;
       keepLocal.addEventListener("click", async () => {
         if (!confirm("将用本地版本覆盖当前服务器版本。此操作不可自动合并，确定继续吗？")) return;
         try {
@@ -697,6 +702,7 @@ async function renderSyncQueue() {
       });
       const keepServer = document.createElement("button");
       keepServer.textContent = "放弃本地修改，保留服务器版本";
+      keepServer.disabled = !navigator.onLine;
       keepServer.addEventListener("click", async () => {
         if (!confirm("删除这条本地待同步修改，并以服务器版本为准？")) return;
         try {
