@@ -982,7 +982,8 @@ function renderHighlights(highlights) {
       card.append(note);
     }
     const remove = document.createElement("button");
-    remove.textContent = "删除摘录";
+    remove.textContent = item.pending_sync ? "等待同步" : "删除摘录";
+    remove.disabled = !navigator.onLine || Boolean(item.pending_sync);
     remove.addEventListener("click", async () => {
       if (!confirm("确定删除这条摘录吗？")) return;
       const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId)
@@ -994,12 +995,15 @@ function renderHighlights(highlights) {
     });
     const makeLiterature = document.createElement("button");
     makeLiterature.textContent = "生成文献笔记";
+    makeLiterature.disabled = !navigator.onLine || Boolean(item.pending_sync);
     makeLiterature.addEventListener("click", () => convertHighlightToKnowledge(item, "literature"));
     const makeNote = document.createElement("button");
     makeNote.textContent = "生成永久笔记";
+    makeNote.disabled = !navigator.onLine || Boolean(item.pending_sync);
     makeNote.addEventListener("click", () => convertHighlightToKnowledge(item, "permanent"));
     const makeCard = document.createElement("button");
     makeCard.textContent = "生成闪卡";
+    makeCard.disabled = !navigator.onLine || Boolean(item.pending_sync);
     makeCard.addEventListener("click", () => convertHighlightToKnowledge(item, "card"));
     card.append(makeLiterature, makeNote, makeCard, remove);
     panel.append(card);
