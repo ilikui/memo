@@ -417,6 +417,7 @@ async function queueDeleteNote(note) {
   };
   if (existing) await transact("outbox", "readwrite", store => store.delete(existing.operation_id));
   await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
   await transact("notes", "readwrite", store => store.put({ ...note, _pending_delete: true }));
   statusEl.textContent = navigator.onLine ? "删除已排队，正在同步…" : "离线：删除操作已保存，联网后自动同步。";
   await loadNotes();
@@ -470,6 +471,7 @@ async function saveNote() {
       };
   await transact("notes", "readwrite", store => store.put(note));
   await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
   statusEl.textContent = navigator.onLine
     ? "笔记已本地保存，正在同步…"
     : "离线：笔记已保存在本机，联网后自动同步。";
@@ -577,6 +579,7 @@ async function queueReview(card, rating) {
     status: "pending"
   };
   await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
   statusEl.textContent = navigator.onLine
     ? "复习已本地保存，正在同步…"
     : "离线：复习已保存到本机，联网后自动同步。";
@@ -689,6 +692,7 @@ async function syncOutbox() {
           operation.status = "conflict";
           operation.server_message = "服务器上的笔记版本已变化。";
           await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
           statusEl.textContent = "笔记同步冲突：本地版本已保留，请手动处理。";
         } else if (response.status === 404 && isDelete) {
           // The target is already absent on the server; treat deletion as completed.
@@ -719,6 +723,7 @@ async function syncOutbox() {
           operation.status = "conflict";
           operation.server_message = "文章已在服务器上删除；本地修改仍保留。";
           await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
           statusEl.textContent = "文章修改冲突：服务器文章不存在，本地内容已保留。";
         } else {
           statusEl.textContent = "文章修改同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
@@ -762,6 +767,7 @@ async function syncOutbox() {
           operation.status = "conflict";
           operation.server_message = "同一摘录 ID 对应不同内容；本地数据已保留。";
           await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
           statusEl.textContent = "摘录同步冲突：本地操作已保留，请检查。";
         } else {
           statusEl.textContent = "摘录同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
@@ -787,6 +793,7 @@ async function syncOutbox() {
         operation.status = "conflict";
         operation.server_message = "The card changed on another device.";
         await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
         statusEl.textContent = "检测到多设备冲突：请在对应闪卡上选择是否放弃本地复习。";
       } else {
         statusEl.textContent = "同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
@@ -1017,6 +1024,7 @@ async function saveReadingDocument() {
       status: "pending", created_at: new Date().toISOString()
     };
     await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
     if (cached) await transact("readingDocuments", "readwrite", store => store.put({
       ...cached, ...payload, id: activeDocumentId, pending_sync: true
     }));
@@ -1071,6 +1079,7 @@ async function saveReadingProgress() {
       payload, status: "pending", created_at: new Date().toISOString()
     };
     await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
     if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, progress: { ...payload } }));
     statusEl.textContent = "阅读进度已保存到本机，联网后会自动同步。";
     await loadReadingList();
@@ -1092,6 +1101,7 @@ async function saveReadingProgress() {
       payload, status: "pending", created_at: new Date().toISOString()
     };
     await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
     if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, progress: { ...payload } }));
     statusEl.textContent = "网络暂不可用，阅读进度已暂存本机，联网后会重试。";
   }
@@ -1272,6 +1282,7 @@ async function createReadingHighlight() {
       payload, status: "pending", created_at: new Date().toISOString()
     };
     await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
     const highlights = [...(cached?.highlights || []), { ...payload, document_id: activeDocumentId, pending_sync: true }];
     if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, highlights }));
     renderHighlights(highlights);
@@ -1307,6 +1318,7 @@ async function createReadingHighlight() {
       payload, status: "pending", created_at: new Date().toISOString()
     };
     await transact("outbox", "readwrite", store => store.put(operation));
+  await renderSyncQueue();
     const highlights = [...(cached?.highlights || []), { ...payload, document_id: activeDocumentId, pending_sync: true }];
     if (cached) await transact("readingDocuments", "readwrite", store => store.put({ ...cached, highlights }));
     renderHighlights(highlights);
