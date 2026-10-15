@@ -812,6 +812,7 @@ async function renderSyncQueue() {
           statusEl.textContent = "已保留服务器版本，本地冲突修改已移除。";
           await renderSyncQueue();
           await loadReadingList();
+          if (activeDocumentId === op.entity_id) await reloadHighlights();
         } catch (error) {
           statusEl.textContent = error.message + "；本地版本仍保留。";
         }
