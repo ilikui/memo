@@ -99,6 +99,23 @@ def test_stale_note_update_returns_conflict():
     assert response.json()["detail"]["code"] == "NOTE_VERSION_CONFLICT"
 
 
+
+def test_note_update_retry_is_idempotent():
+    note = client.post("/api/notes", json={"title": "Retry target"}).json()
+    operation_id = f"note-update-{uuid4()}"
+    payload = {
+        "operation_id": operation_id,
+        "title": "Updated exactly once",
+        "body_markdown": "Stable retry payload",
+        "note_type": "permanent",
+        "expected_updated_at": note["updated_at"],
+    }
+    first = client.put(f"/api/notes/{note['id']}", json=payload)
+    second = client.put(f"/api/notes/{note['id']}", json=payload)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["title"] == "Updated exactly once"
+
 def test_note_validation_and_not_found():
     invalid = client.post("/api/notes", json={"title": "   ", "body_markdown": "content"})
     assert invalid.status_code == 422
