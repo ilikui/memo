@@ -1119,10 +1119,20 @@ async function reloadHighlights() {
   const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/highlights");
   if (!response.ok) return;
   const highlights = await response.json();
-  renderHighlights(highlights);
+  const mergedHighlights = [...highlights];
+  for (const operation of (await getAll("outbox")).filter(op =>
+    op.entity_type === "reading_highlight_create" &&
+    op.entity_id === activeDocumentId &&
+    op.status !== "conflict"
+  )) {
+    if (!mergedHighlights.some(item => item.id === operation.payload.id)) {
+      mergedHighlights.push({ ...operation.payload, document_id: activeDocumentId, pending_sync: true });
+    }
+  }
+  renderHighlights(mergedHighlights);
   const cached = await getById("readingDocuments", activeDocumentId);
   if (cached) {
-    await transact("readingDocuments", "readwrite", store => store.put({ ...cached, highlights }));
+    await transact("readingDocuments", "readwrite", store => store.put({ ...cached, highlights: mergedHighlights }));
   }
 }
 
