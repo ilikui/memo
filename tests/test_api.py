@@ -315,3 +315,29 @@ def test_progressive_reading_validation_and_missing_document():
         "quote_text": "Text", "position_start": 50, "position_end": 10,
     })
     assert invalid_highlight.status_code == 422
+
+
+
+def test_stale_reading_document_update_returns_conflict():
+    created = client.post("/api/documents", json={
+        "title": f"Concurrent edit {uuid4().hex}",
+        "content_markdown": "Original",
+    })
+    assert created.status_code == 201, created.text
+    document = created.json()
+
+    first = client.put(f"/api/documents/{document['id']}", json={
+        "title": "Server version",
+        "expected_updated_at": document["updated_at"],
+    })
+    assert first.status_code == 200, first.text
+
+    stale = client.put(f"/api/documents/{document['id']}", json={
+        "title": "Offline local version",
+        "content_markdown": "Local changes must not overwrite the server silently.",
+        "expected_updated_at": document["updated_at"],
+    })
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "DOCUMENT_VERSION_CONFLICT"
+    current = client.get(f"/api/documents/{document['id']}").json()
+    assert current["title"] == "Server version"
