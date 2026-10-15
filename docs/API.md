@@ -47,7 +47,7 @@ For offline synchronization, the client generates a stable note ID before saving
 | POST | `/api/documents/{id}/highlights` | Save a quote, optional note and optional character offsets |
 | DELETE | `/api/documents/{id}/highlights/{highlight_id}` | Delete a saved highlight |
 
-The PWA reading workspace supports manually pasting article text/Markdown, saving the source URL as metadata, resuming from the reading list, updating progress and recording highlights. It deliberately does not fetch arbitrary URLs yet; this avoids unsafe server-side URL fetching and keeps import behavior explicit. Reading data is currently online-only and is not part of the IndexedDB sync outbox.
+The PWA reading workspace supports manually pasting article text/Markdown, saving the source URL as metadata, resuming from the reading list, updating progress and recording highlights. A highlight can be converted to a stable-ID literature note, then a linked permanent note, and optionally an FSRS flashcard associated with that permanent note. Repeating conversion reuses stable note IDs; the UI checks for an existing flashcard before creating another. It deliberately does not fetch arbitrary URLs yet; this avoids unsafe server-side URL fetching and keeps import behavior explicit. Reading data is currently online-only and is not part of the IndexedDB sync outbox.
 
 ## Flashcards and reviews
 
