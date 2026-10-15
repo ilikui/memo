@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fsrs import Card, Rating, Scheduler
 
 RATING_MAP = {1: Rating.Again, 2: Rating.Hard, 3: Rating.Good, 4: Rating.Easy}
@@ -10,8 +10,8 @@ def utc_datetime(value: datetime | None = None) -> datetime:
     return value.astimezone(timezone.utc)
 
 def new_card_state(now: datetime | None = None) -> tuple[str, datetime]:
-    utc_datetime(now)
-    card = Card()
+    now_utc = utc_datetime(now)
+    card = Card(due=now_utc)
     return card.to_json(), utc_datetime(card.due)
 
 def review_card_state(card_json: str, rating_value: int, reviewed_at: datetime | None = None,
@@ -20,10 +20,11 @@ def review_card_state(card_json: str, rating_value: int, reviewed_at: datetime |
         raise ValueError("rating must be 1=Again, 2=Hard, 3=Good, 4=Easy")
     when = utc_datetime(reviewed_at)
     card = Card.from_json(card_json)
+    duration = timedelta(milliseconds=review_duration_ms) if review_duration_ms is not None else None
     scheduler = Scheduler()
     updated_card, log = scheduler.review_card(
         card, RATING_MAP[rating_value],
         review_datetime=when,
-        review_duration=review_duration_ms,
+        review_duration=duration,
     )
     return updated_card.to_json(), log.to_json(), utc_datetime(log.review_datetime), utc_datetime(updated_card.due)
