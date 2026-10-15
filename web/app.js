@@ -719,6 +719,12 @@ async function syncOutbox() {
           }));
           await transact("outbox", "readwrite", store => store.delete(operation.operation_id));
           statusEl.textContent = "离线文章修改已同步。";
+        } else if (response.status === 409) {
+          operation.status = "conflict";
+          operation.server_message = "服务器文章已被其他操作修改；本地内容已保留，请比较两个版本。";
+          await transact("outbox", "readwrite", store => store.put(operation));
+          await renderSyncQueue();
+          statusEl.textContent = "文章版本冲突：本地修改已保留，未覆盖服务器版本。";
         } else if (response.status === 404) {
           operation.status = "conflict";
           operation.server_message = "文章已在服务器上删除；本地修改仍保留。";
@@ -1010,9 +1016,12 @@ async function saveReadingDocument() {
     statusEl.textContent = "文章标题不能为空。";
     return;
   }
-  const payload = { title, source_url, content_markdown };
   const cached = await getById("readingDocuments", activeDocumentId);
-  const queueUpdate = async message => {
+  const payload = {
+    title, source_url, content_markdown,
+    ...(cached?.updated_at ? { expected_updated_at: cached.updated_at } : {})
+  };
+  const queueUpdate = async (message, conflict = false) => {
     // Keep only the newest full-document snapshot; earlier snapshots are superseded.
     const pending = (await getAll("outbox")).filter(op =>
       op.entity_type === "reading_document_update" && op.entity_id === activeDocumentId
@@ -1021,7 +1030,9 @@ async function saveReadingDocument() {
     const operation = {
       operation_id: crypto.randomUUID(), entity_type: "reading_document_update",
       entity_id: activeDocumentId, operation: "update", payload,
-      status: "pending", created_at: new Date().toISOString()
+      status: conflict ? "conflict" : "pending",
+      ...(conflict ? { server_message: "服务器文章已变化；本地修改仍保留，请比较版本后决定如何处理。" } : {}),
+      created_at: new Date().toISOString()
     };
     await transact("outbox", "readwrite", store => store.put(operation));
   await renderSyncQueue();
@@ -1044,6 +1055,10 @@ async function saveReadingDocument() {
     });
     if (!response.ok) {
       if (response.status >= 500) throw new Error("server unavailable");
+      if (response.status === 409) {
+        await queueUpdate("检测到文章版本冲突：本地修改已保留，服务器版本未被覆盖。", true);
+        return;
+      }
       statusEl.textContent = "保存正文失败（HTTP " + response.status + "）。";
       return;
     }
