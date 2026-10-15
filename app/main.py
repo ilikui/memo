@@ -25,8 +25,10 @@ from .schemas import (
 )
 from .services.fsrs import new_card_state, review_card_state
 from .services.sync import append_event
+from .reading import router as reading_router
 
-app = FastAPI(title="VibeReading API", version="0.2.0")
+app = FastAPI(title="VibeReading API", version="0.3.0")
+app.include_router(reading_router)
 Base.metadata.create_all(bind=engine)  # Development only. Use Alembic migrations in production.
 
 
