@@ -415,24 +415,46 @@ async function syncOutbox() {
       if (operation.entity_type === "note_mutation") {
         const note = operation.payload.note;
         const isCreate = operation.operation === "create";
-        const payload = isCreate
-          ? { id: note.id, title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id }
-          : { operation_id: operation.operation_id, title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id, expected_updated_at: operation.payload.expected_updated_at };
-        response = await fetch(isCreate ? "/api/notes" : "/api/notes/" + encodeURIComponent(note.id), {
-          method: isCreate ? "POST" : "PUT",
+        const isDelete = operation.operation === "delete";
+        let url = "/api/notes";
+        let method = "POST";
+        let payload;
+        if (isCreate) {
+          payload = { id: note.id, title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id };
+        } else if (isDelete) {
+          url += "/" + encodeURIComponent(note.id)
+            + "?operation_id=" + encodeURIComponent(operation.operation_id)
+            + "&expected_updated_at=" + encodeURIComponent(operation.payload.expected_updated_at || "");
+          method = "DELETE";
+        } else {
+          url += "/" + encodeURIComponent(note.id);
+          method = "PUT";
+          payload = { operation_id: operation.operation_id, title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id, expected_updated_at: operation.payload.expected_updated_at };
+        }
+        response = await fetch(url, {
+          method,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          ...(payload ? { body: JSON.stringify(payload) } : {})
         });
         if (response.ok) {
-          const saved = await response.json();
-          await transact("notes", "readwrite", store => store.put(saved));
+          if (isDelete) {
+            await transact("notes", "readwrite", store => store.delete(note.id));
+          } else {
+            const saved = await response.json();
+            await transact("notes", "readwrite", store => store.put(saved));
+          }
           await transact("outbox", "readwrite", store => store.delete(operation.operation_id));
-          statusEl.textContent = "笔记已同步。";
+          statusEl.textContent = isDelete ? "笔记已删除并同步。" : "笔记已同步。";
         } else if (response.status === 409) {
           operation.status = "conflict";
           operation.server_message = "服务器上的笔记版本已变化。";
           await transact("outbox", "readwrite", store => store.put(operation));
           statusEl.textContent = "笔记同步冲突：本地版本已保留，请手动处理。";
+        } else if (response.status === 404 && isDelete) {
+          // The target is already absent on the server; treat deletion as completed.
+          await transact("notes", "readwrite", store => store.delete(note.id));
+          await transact("outbox", "readwrite", store => store.delete(operation.operation_id));
+          statusEl.textContent = "服务器上的笔记已不存在，已清理本地副本。";
         } else {
           statusEl.textContent = "笔记同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
         }
