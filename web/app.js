@@ -1,13 +1,17 @@
 const statusEl = document.querySelector("#status");
 const cardsEl = document.querySelector("#cards");
+const noteListEl = document.querySelector("#noteList");
+let editingNoteId = null;
+let cachedNotes = [];
 
 function openDb() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open("vibereading", 1);
+    const req = indexedDB.open("vibereading", 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains("cards")) db.createObjectStore("cards", { keyPath: "id" });
       if (!db.objectStoreNames.contains("outbox")) db.createObjectStore("outbox", { keyPath: "operation_id" });
+      if (!db.objectStoreNames.contains("notes")) db.createObjectStore("notes", { keyPath: "id" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -34,6 +38,104 @@ async function getAll(name) {
   });
 }
 
+function renderNotes() {
+  const query = document.querySelector("#noteSearch").value.trim().toLocaleLowerCase();
+  const matches = cachedNotes.filter(note =>
+    !query || (note.title + "\n" + note.body_markdown).toLocaleLowerCase().includes(query)
+  );
+  noteListEl.replaceChildren();
+  if (!matches.length) {
+    noteListEl.textContent = query ? "没有匹配的缓存笔记。" : "还没有笔记，创建第一条吧。";
+    return;
+  }
+  for (const note of matches) {
+    const row = document.createElement("div");
+    row.className = "note-row";
+    const title = document.createElement("strong");
+    title.textContent = note.title;
+    const meta = document.createElement("p");
+    meta.className = "muted";
+    meta.textContent = note.note_type + " · " + new Date(note.updated_at).toLocaleString();
+    const excerpt = document.createElement("p");
+    excerpt.textContent = note.body_markdown.slice(0, 180);
+    const edit = document.createElement("button");
+    edit.textContent = "编辑";
+    edit.addEventListener("click", () => {
+      editingNoteId = note.id;
+      document.querySelector("#noteTitle").value = note.title;
+      document.querySelector("#noteBody").value = note.body_markdown;
+      document.querySelector("#noteType").value = note.note_type;
+      document.querySelector("#noteEditing").textContent = "正在编辑：" + note.title;
+      document.querySelector("#saveNote").textContent = "更新笔记";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+    row.append(title, meta, excerpt, edit);
+    noteListEl.append(row);
+  }
+}
+
+async function loadNotes() {
+  if (navigator.onLine) {
+    try {
+      const response = await fetch("/api/notes?limit=500");
+      if (response.ok) {
+        for (const note of await response.json()) {
+          await transact("notes", "readwrite", store => store.put(note));
+        }
+      }
+    } catch {
+      statusEl.textContent = "网络不可用；显示本机缓存的笔记。";
+    }
+  }
+  cachedNotes = (await getAll("notes")).sort((a, b) =>
+    new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+  );
+  renderNotes();
+}
+
+function resetNoteEditor() {
+  editingNoteId = null;
+  document.querySelector("#noteTitle").value = "";
+  document.querySelector("#noteBody").value = "";
+  document.querySelector("#noteType").value = "permanent";
+  document.querySelector("#noteEditing").textContent = "新建笔记";
+  document.querySelector("#saveNote").textContent = "保存笔记";
+}
+
+async function saveNote() {
+  const title = document.querySelector("#noteTitle").value.trim();
+  const body_markdown = document.querySelector("#noteBody").value;
+  const note_type = document.querySelector("#noteType").value;
+  if (!title) {
+    statusEl.textContent = "请填写笔记标题。";
+    return;
+  }
+  if (!navigator.onLine) {
+    statusEl.textContent = "当前版本支持离线阅读缓存；离线编辑保存尚未启用，请联网后保存。";
+    return;
+  }
+  const payload = { title, body_markdown, note_type };
+  const isEditing = Boolean(editingNoteId);
+  try {
+    const response = await fetch(isEditing ? "/api/notes/" + encodeURIComponent(editingNoteId) : "/api/notes", {
+      method: isEditing ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      statusEl.textContent = "保存笔记失败（HTTP " + response.status + "）。";
+      return;
+    }
+    const note = await response.json();
+    await transact("notes", "readwrite", store => store.put(note));
+    statusEl.textContent = isEditing ? "笔记已更新。" : "笔记已保存。";
+    resetNoteEditor();
+    await loadNotes();
+  } catch {
+    statusEl.textContent = "无法连接服务器；笔记未保存。";
+  }
+}
+
 async function refresh() {
   if (navigator.onLine) {
     try {
@@ -43,10 +145,10 @@ async function refresh() {
           await transact("cards", "readwrite", store => store.put(card));
         }
       } else {
-        statusEl.textContent = "Server refresh failed (HTTP " + response.status + "); showing cached cards.";
+        statusEl.textContent = "刷新闪卡失败（HTTP " + response.status + "）；显示本机缓存。";
       }
     } catch {
-      statusEl.textContent = "Server unavailable; showing cached cards.";
+      statusEl.textContent = "服务器不可用；显示本机缓存的闪卡。";
     }
   }
 
@@ -59,8 +161,8 @@ async function refresh() {
 
   if (!cards.length) {
     cardsEl.textContent = navigator.onLine
-      ? "No cards yet. Create your first card above."
-      : "No cards are cached on this device yet. Connect to load your cards.";
+      ? "还没有闪卡，请先创建一张。"
+      : "本设备没有缓存闪卡，请联网加载。";
     return;
   }
 
@@ -75,17 +177,16 @@ async function refresh() {
     if (pending) {
       const note = document.createElement("p");
       note.textContent = pending.status === "conflict"
-        ? "Sync conflict: this review needs your decision."
-        : "Review queued on this device; another review is disabled until it syncs.";
+        ? "同步冲突：需要你决定如何处理这条本地复习。"
+        : "复习已保存在本机，等待同步；同步前不能重复复习此卡。";
       item.append(note);
-
       if (pending.status === "conflict") {
         const discard = document.createElement("button");
-        discard.textContent = "Discard local review and reload server state";
+        discard.textContent = "放弃本地复习并重新加载服务器状态";
         discard.addEventListener("click", async () => {
-          if (!confirm("This removes the queued review from this device. Continue?")) return;
+          if (!confirm("这会删除本机排队的复习操作。确定继续吗？")) return;
           await transact("outbox", "readwrite", store => store.delete(pending.operation_id));
-          statusEl.textContent = "Local review discarded; refreshing server state…";
+          statusEl.textContent = "本地复习操作已放弃，正在刷新服务器状态…";
           await refresh();
         });
         item.append(discard);
@@ -95,16 +196,16 @@ async function refresh() {
     }
 
     const reveal = document.createElement("button");
-    reveal.textContent = "Show answer";
+    reveal.textContent = "显示答案";
     reveal.addEventListener("click", () => {
       const answer = document.createElement("p");
       answer.textContent = card.back;
       answer.className = "answer";
       const due = document.createElement("small");
-      due.textContent = "Due: " + new Date(card.due_at).toLocaleString();
+      due.textContent = "到期时间：" + new Date(card.due_at).toLocaleString();
       reveal.remove();
       item.append(answer, due);
-      for (const [rating, label] of [[1, "Again"], [2, "Hard"], [3, "Good"], [4, "Easy"]]) {
+      for (const [rating, label] of [[1, "重来"], [2, "困难"], [3, "良好"], [4, "简单"]]) {
         const button = document.createElement("button");
         button.textContent = label;
         button.addEventListener("click", () => queueReview(card, rating));
@@ -119,11 +220,10 @@ async function refresh() {
 async function queueReview(card, rating) {
   const existing = (await getAll("outbox")).find(op => op.entity_id === card.id);
   if (existing) {
-    statusEl.textContent = "This card already has a queued review.";
+    statusEl.textContent = "这张卡已有一条待同步复习。";
     await refresh();
     return;
   }
-
   const now = new Date().toISOString();
   const operation = {
     operation_id: crypto.randomUUID(),
@@ -136,18 +236,17 @@ async function queueReview(card, rating) {
   };
   await transact("outbox", "readwrite", store => store.put(operation));
   statusEl.textContent = navigator.onLine
-    ? "Review saved locally; attempting sync…"
-    : "Offline: review saved on this device and will sync when connected.";
+    ? "复习已本地保存，正在同步…"
+    : "离线：复习已保存到本机，联网后自动同步。";
   await refresh();
   await syncOutbox();
 }
 
 async function syncOutbox() {
   if (!navigator.onLine) {
-    statusEl.textContent = "Offline: queued reviews will retry when connection returns.";
+    statusEl.textContent = "离线：待同步复习会在恢复连接后重试。";
     return;
   }
-
   const operations = (await getAll("outbox")).filter(op => op.status !== "conflict");
   for (const operation of operations) {
     try {
@@ -161,35 +260,38 @@ async function syncOutbox() {
           reviewed_at: operation.payload.reviewed_at
         })
       });
-
       if (response.ok) {
         await transact("outbox", "readwrite", store => store.delete(operation.operation_id));
-        statusEl.textContent = "Review synced.";
+        statusEl.textContent = "复习已同步。";
       } else if (response.status === 409) {
         operation.status = "conflict";
         operation.server_message = "The card changed on another device.";
         await transact("outbox", "readwrite", store => store.put(operation));
-        statusEl.textContent = "Multi-device conflict: choose whether to discard the local review.";
+        statusEl.textContent = "检测到多设备冲突：请在对应闪卡上选择是否放弃本地复习。";
       } else {
-        statusEl.textContent = "Sync failed (HTTP " + response.status + "); operation retained.";
+        statusEl.textContent = "同步失败（HTTP " + response.status + "）；操作仍保留在本机。";
       }
     } catch {
-      statusEl.textContent = "Network unavailable; operation retained locally.";
+      statusEl.textContent = "网络不可用；操作仍保留在本机。";
       return;
     }
   }
   await refresh();
 }
 
+document.querySelector("#noteSearch").addEventListener("input", renderNotes);
+document.querySelector("#saveNote").addEventListener("click", saveNote);
+document.querySelector("#newNote").addEventListener("click", resetNoteEditor);
+
 document.querySelector("#create").addEventListener("click", async () => {
   const front = document.querySelector("#front").value.trim();
   const back = document.querySelector("#back").value.trim();
   if (!front || !back) {
-    statusEl.textContent = "Fill in both fields.";
+    statusEl.textContent = "请填写闪卡正反面。";
     return;
   }
   if (!navigator.onLine) {
-    statusEl.textContent = "Offline card creation is not implemented in this starter yet.";
+    statusEl.textContent = "当前版本暂不支持离线创建闪卡。";
     return;
   }
   try {
@@ -199,29 +301,32 @@ document.querySelector("#create").addEventListener("click", async () => {
       body: JSON.stringify({ front, back })
     });
     if (!response.ok) {
-      statusEl.textContent = "Create failed: HTTP " + response.status;
+      statusEl.textContent = "创建闪卡失败（HTTP " + response.status + "）。";
       return;
     }
     const card = await response.json();
     await transact("cards", "readwrite", store => store.put(card));
     document.querySelector("#front").value = "";
     document.querySelector("#back").value = "";
-    statusEl.textContent = "Card created.";
+    statusEl.textContent = "闪卡已创建。";
     await refresh();
   } catch {
-    statusEl.textContent = "Could not reach server; card was not created.";
+    statusEl.textContent = "无法连接服务器；闪卡未创建。";
   }
 });
 
 document.querySelector("#refresh").addEventListener("click", refresh);
-addEventListener("online", syncOutbox);
+addEventListener("online", async () => {
+  await loadNotes();
+  await syncOutbox();
+});
 addEventListener("offline", () => {
-  statusEl.textContent = "Offline: review actions are saved locally.";
+  statusEl.textContent = "离线：可查看已缓存笔记与闪卡，复习操作会保存到本机。";
 });
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/web/sw.js").catch(console.error);
 }
 
 await openDb();
-statusEl.textContent = navigator.onLine ? "Online" : "Offline";
-await refresh();
+statusEl.textContent = navigator.onLine ? "在线" : "离线";
+await Promise.all([loadNotes(), refresh()]);
