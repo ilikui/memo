@@ -31,3 +31,4 @@
 - Added reading-document conflict comparison and explicit local/server version resolution in the sync queue.
 
 - Strengthened stale reading-edit regression coverage to verify rejected updates do not partially change title, source URL, or body.
+- Improved reading-conflict comparison with line-by-line additions/removals; very large documents fall back to readable side-by-side versions to limit memory use.
