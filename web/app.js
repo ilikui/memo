@@ -672,7 +672,7 @@ async function renderSyncQueue() {
             "原文链接：" + (server.source_url || ""),
             "",
             server.content_markdown || ""
-          ].join("\\n");
+          ].join("\n");
         } catch (error) {
           comparison.textContent = "无法读取服务器版本：" + error.message + "。本地内容仍保留。";
         }
