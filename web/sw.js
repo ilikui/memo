@@ -1,5 +1,5 @@
-const CACHE = "vibereading-shell-v22";
-const SHELL = ["/web/index.html", "/web/app.js", "/web/manifest.webmanifest"];
+const CACHE = "vibereading-shell-v23";
+const SHELL = ["/web/index.html", "/web/app.js", "/web/conflict-diff.js", "/web/manifest.webmanifest"];
 
 self.addEventListener("install", event => {
   event.waitUntil(
