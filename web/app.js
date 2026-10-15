@@ -693,6 +693,237 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/web/sw.js").catch(console.error);
 }
 
+
+let activeDocumentId = null;
+
+async function loadReadingList() {
+  const list = document.querySelector("#readingList");
+  list.replaceChildren();
+  if (!navigator.onLine) {
+    list.textContent = "阅读清单目前需要联网加载；已打开的正文仍可在当前页面中查看。";
+    return;
+  }
+  try {
+    const response = await fetch("/api/documents?limit=500");
+    if (!response.ok) throw new Error("Unable to load reading queue");
+    const documents = await response.json();
+    if (!documents.length) {
+      list.textContent = "阅读清单还是空的，添加第一篇文章吧。";
+      return;
+    }
+    for (const item of documents) {
+      const row = document.createElement("div");
+      row.className = "note-row";
+      const title = document.createElement("strong");
+      title.textContent = item.title;
+      const meta = document.createElement("p");
+      meta.className = "muted";
+      meta.textContent = (item.progress.status === "completed" ? "已完成" : item.progress.status === "reading" ? "阅读中" : "未开始")
+        + " · " + item.progress.progress_percent + "%";
+      const open = document.createElement("button");
+      open.textContent = "继续阅读";
+      open.addEventListener("click", () => openReadingDocument(item.id));
+      row.append(title, meta, open);
+      list.append(row);
+    }
+  } catch {
+    list.textContent = "读取清单失败，请检查网络后重试。";
+  }
+}
+
+async function openReadingDocument(id) {
+  try {
+    const response = await fetch("/api/documents/" + encodeURIComponent(id));
+    if (!response.ok) throw new Error("Document not found");
+    const item = await response.json();
+    activeDocumentId = item.id;
+    document.querySelector("#readingEditor").hidden = false;
+    document.querySelector("#readingCurrentTitle").textContent = item.title;
+    document.querySelector("#readingSource").textContent = item.source_url || "未设置原文链接";
+    document.querySelector("#readingTitle").value = item.title;
+    document.querySelector("#readingUrl").value = item.source_url || "";
+    document.querySelector("#readingBody").value = item.content_markdown || "";
+    document.querySelector("#readingStatus").value = item.progress.status;
+    document.querySelector("#readingProgress").value = item.progress.progress_percent;
+    document.querySelector("#readingProgressLabel").textContent = item.progress.progress_percent + "%";
+    renderHighlights(item.highlights || []);
+    document.querySelector("#readingEditor").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch {
+    statusEl.textContent = "打开文章失败，请稍后重试。";
+  }
+}
+
+async function createReadingDocument() {
+  const title = document.querySelector("#readingTitle").value.trim();
+  const source_url = document.querySelector("#readingUrl").value.trim() || null;
+  const content_markdown = document.querySelector("#readingContent").value;
+  if (!title) {
+    statusEl.textContent = "请先填写文章标题。";
+    return;
+  }
+  if (source_url && !/^https?:\/\//i.test(source_url)) {
+    statusEl.textContent = "原文链接必须以 http:// 或 https:// 开头。";
+    return;
+  }
+  try {
+    const response = await fetch("/api/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, source_url, content_markdown })
+    });
+    if (!response.ok) {
+      statusEl.textContent = "加入阅读清单失败（HTTP " + response.status + "）。";
+      return;
+    }
+    const item = await response.json();
+    document.querySelector("#readingTitle").value = "";
+    document.querySelector("#readingUrl").value = "";
+    document.querySelector("#readingContent").value = "";
+    statusEl.textContent = "已加入阅读清单。";
+    await loadReadingList();
+    await openReadingDocument(item.id);
+  } catch {
+    statusEl.textContent = "无法连接服务器，阅读材料尚未保存。";
+  }
+}
+
+async function saveReadingDocument() {
+  if (!activeDocumentId) return;
+  const title = document.querySelector("#readingTitle").value.trim();
+  const source_url = document.querySelector("#readingUrl").value.trim() || null;
+  const content_markdown = document.querySelector("#readingBody").value;
+  if (!title) {
+    statusEl.textContent = "文章标题不能为空。";
+    return;
+  }
+  try {
+    const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, source_url, content_markdown })
+    });
+    if (!response.ok) throw new Error("save failed");
+    document.querySelector("#readingCurrentTitle").textContent = title;
+    document.querySelector("#readingSource").textContent = source_url || "未设置原文链接";
+    statusEl.textContent = "文章正文已保存。";
+    await loadReadingList();
+  } catch {
+    statusEl.textContent = "保存正文失败，请检查网络后重试。";
+  }
+}
+
+async function saveReadingProgress() {
+  if (!activeDocumentId) return;
+  const progress_percent = Number(document.querySelector("#readingProgress").value);
+  const status = document.querySelector("#readingStatus").value;
+  try {
+    const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/progress", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, progress_percent })
+    });
+    if (!response.ok) throw new Error("progress save failed");
+    statusEl.textContent = "阅读进度已保存。";
+    await loadReadingList();
+  } catch {
+    statusEl.textContent = "保存阅读进度失败，请稍后重试。";
+  }
+}
+
+function renderHighlights(highlights) {
+  const panel = document.querySelector("#highlightList");
+  panel.replaceChildren();
+  if (!highlights.length) {
+    panel.textContent = "还没有摘录。";
+    return;
+  }
+  for (const item of highlights) {
+    const card = document.createElement("article");
+    card.className = "note-row";
+    const quote = document.createElement("blockquote");
+    quote.textContent = item.quote_text;
+    card.append(quote);
+    if (item.note) {
+      const note = document.createElement("p");
+      note.textContent = item.note;
+      card.append(note);
+    }
+    const remove = document.createElement("button");
+    remove.textContent = "删除摘录";
+    remove.addEventListener("click", async () => {
+      if (!confirm("确定删除这条摘录吗？")) return;
+      const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId)
+        + "/highlights/" + encodeURIComponent(item.id), { method: "DELETE" });
+      if (response.ok) {
+        await reloadHighlights();
+        statusEl.textContent = "摘录已删除。";
+      }
+    });
+    card.append(remove);
+    panel.append(card);
+  }
+}
+
+async function reloadHighlights() {
+  if (!activeDocumentId) return;
+  const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/highlights");
+  if (response.ok) renderHighlights(await response.json());
+}
+
+async function createReadingHighlight() {
+  if (!activeDocumentId) {
+    statusEl.textContent = "请先从阅读清单打开一篇文章。";
+    return;
+  }
+  const quote_text = document.querySelector("#highlightQuote").value.trim();
+  const note = document.querySelector("#highlightNote").value.trim();
+  if (!quote_text) {
+    statusEl.textContent = "请填写要保存的摘录。";
+    return;
+  }
+  try {
+    const response = await fetch("/api/documents/" + encodeURIComponent(activeDocumentId) + "/highlights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quote_text, note })
+    });
+    if (!response.ok) {
+      statusEl.textContent = "保存摘录失败（HTTP " + response.status + "）。";
+      return;
+    }
+    document.querySelector("#highlightQuote").value = "";
+    document.querySelector("#highlightNote").value = "";
+    await reloadHighlights();
+    statusEl.textContent = "摘录已保存。";
+    await loadReadingList();
+  } catch {
+    statusEl.textContent = "无法连接服务器，摘录尚未保存。";
+  }
+}
+
+document.querySelector("#createDocument").addEventListener("click", createReadingDocument);
+document.querySelector("#saveReadingDocument").addEventListener("click", saveReadingDocument);
+document.querySelector("#saveReadingProgress").addEventListener("click", saveReadingProgress);
+document.querySelector("#saveHighlight").addEventListener("click", createReadingHighlight);
+document.querySelector("#readingProgress").addEventListener("input", event => {
+  document.querySelector("#readingProgressLabel").textContent = event.target.value + "%";
+});
+document.querySelector("#captureSelection").addEventListener("click", () => {
+  const body = document.querySelector("#readingBody");
+  const selection = body.value.slice(body.selectionStart, body.selectionEnd).trim();
+  if (!selection) {
+    statusEl.textContent = "请先在正文编辑框中选中一段文字。";
+    return;
+  }
+  document.querySelector("#highlightQuote").value = selection;
+});
+document.querySelector("#readingStatus").addEventListener("change", event => {
+  if (event.target.value === "completed") {
+    document.querySelector("#readingProgress").value = 100;
+    document.querySelector("#readingProgressLabel").textContent = "100%";
+  }
+});
+
 await openDb();
 statusEl.textContent = navigator.onLine ? "在线" : "离线";
 await Promise.all([loadNotes(), refresh()]);
