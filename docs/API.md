@@ -14,8 +14,10 @@
 | GET | `/api/notes?q=term&note_type=permanent&limit=100` | Search note title/body and filter by type |
 | GET | `/api/notes/{id}` | Read one note |
 | PUT | `/api/notes/{id}` | Update a note with optional `operation_id` and `expected_updated_at` |
+| GET | `/api/notes/{id}/links` | Parse `[[Title]]` references and resolve target notes by title |
+| GET | `/api/notes/{id}/backlinks` | Find notes that reference the target note title |
 
-Supported note types: `fleeting`, `literature`, `permanent`, `index`. Markdown is stored as text; rendering and backlink extraction are not implemented yet.
+Supported note types: `fleeting`, `literature`, `permanent`, `index`. Markdown is stored as text. Wiki-links support `[[Title]]`, aliases such as `[[Title|label]]`, and heading anchors such as `[[Title#section]]`. Link resolution currently uses exact case-insensitive note-title matching; backlinks are computed from note bodies at request time.
 
 Example create payload:
 
