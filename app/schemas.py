@@ -49,6 +49,7 @@ class NoteCreate(BaseModel):
 
 
 class NoteUpdate(BaseModel):
+    operation_id: str | None = Field(default=None, min_length=8, max_length=100)
     title: str = Field(min_length=1, max_length=500)
     body_markdown: str = Field(default="", max_length=200000)
     note_type: NoteType = "permanent"
