@@ -1,7 +1,9 @@
+import json
 from datetime import datetime, timedelta, timezone
 from fsrs import Card, Rating, Scheduler
 
 RATING_MAP = {1: Rating.Again, 2: Rating.Hard, 3: Rating.Good, 4: Rating.Easy}
+
 
 def utc_datetime(value: datetime | None = None) -> datetime:
     value = value or datetime.now(timezone.utc)
@@ -9,13 +11,32 @@ def utc_datetime(value: datetime | None = None) -> datetime:
         raise ValueError("datetime must include a timezone")
     return value.astimezone(timezone.utc)
 
+
 def new_card_state(now: datetime | None = None) -> tuple[str, datetime]:
     now_utc = utc_datetime(now)
     card = Card(due=now_utc)
     return card.to_json(), utc_datetime(card.due)
 
-def review_card_state(card_json: str, rating_value: int, reviewed_at: datetime | None = None,
-                      review_duration_ms: int | None = None) -> tuple[str, str, datetime, datetime]:
+
+def serialize_review_log(log) -> str:
+    """Serialize py-fsrs ReviewLog values into stable JSON.
+
+    py-fsrs 6.x exposes review_duration as timedelta in to_dict(), which the
+    default JSON encoder cannot serialize. Store it as integer milliseconds.
+    """
+    payload = log.to_dict()
+    duration = payload.get("review_duration")
+    if isinstance(duration, timedelta):
+        payload["review_duration"] = round(duration.total_seconds() * 1000)
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def review_card_state(
+    card_json: str,
+    rating_value: int,
+    reviewed_at: datetime | None = None,
+    review_duration_ms: int | None = None,
+) -> tuple[str, str, datetime, datetime]:
     if rating_value not in RATING_MAP:
         raise ValueError("rating must be 1=Again, 2=Hard, 3=Good, 4=Easy")
     when = utc_datetime(reviewed_at)
@@ -23,8 +44,14 @@ def review_card_state(card_json: str, rating_value: int, reviewed_at: datetime |
     duration = timedelta(milliseconds=review_duration_ms) if review_duration_ms is not None else None
     scheduler = Scheduler()
     updated_card, log = scheduler.review_card(
-        card, RATING_MAP[rating_value],
+        card,
+        RATING_MAP[rating_value],
         review_datetime=when,
         review_duration=duration,
     )
-    return updated_card.to_json(), log.to_json(), utc_datetime(log.review_datetime), utc_datetime(updated_card.due)
+    return (
+        updated_card.to_json(),
+        serialize_review_log(log),
+        utc_datetime(log.review_datetime),
+        utc_datetime(updated_card.due),
+    )
