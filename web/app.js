@@ -39,6 +39,15 @@ async function getAll(name) {
   });
 }
 
+async function getById(name, id) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(name).objectStore(name).get(id);
+    req.onsuccess = () => { db.close(); resolve(req.result); };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
 function getPendingNoteOperation(noteId) {
   // The renderer is synchronous; the most recent in-memory list is refreshed on each load.
   return pendingNoteOperations.find(op => op.entity_id === noteId) || null;
@@ -711,7 +720,7 @@ async function loadReadingList() {
       if (!response.ok) throw new Error("Unable to load reading queue");
       documents = await response.json();
       for (const item of documents) {
-        const cached = await transact("readingDocuments", "readwrite", store => store.get(item.id));
+        const cached = await getById("readingDocuments", item.id);
         // Do not replace a full cached document with the shorter list summary.
         if (!cached || !cached.content_markdown) {
           await transact("readingDocuments", "readwrite", store => store.put(item));
@@ -765,7 +774,7 @@ async function openReadingDocument(id) {
         item = await response.json();
         await transact("readingDocuments", "readwrite", store => store.put(item));
       } catch {
-        item = await transact("readingDocuments", "readonly", store => store.get(id));
+        item = await getById("readingDocuments", id);
         if (!item || !item.content_markdown) throw new Error("No cached document available");
         statusEl.textContent = "已打开本机缓存的文章；离线状态下不能保存修改。";
       }
