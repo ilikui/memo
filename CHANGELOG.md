@@ -27,3 +27,5 @@
 - Added a visible offline sync queue with pending/conflict counts and manual retry controls.
 - Added optimistic version checks for reading-document updates so stale offline edits cannot silently overwrite newer server content.
 - Added API coverage for stale reading-document update conflicts.
+
+- Added reading-document conflict comparison and explicit local/server version resolution in the sync queue.
