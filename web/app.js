@@ -595,6 +595,77 @@ const syncQueueLabels = {
   reading_document_update: "文章正文修改"
 };
 
+function renderLineDiff(container, localText, serverText) {
+  const localLines = localText.split("\n");
+  const serverLines = serverText.split("\n");
+  container.replaceChildren();
+
+  const heading = document.createElement("div");
+  heading.className = "diff-legend muted";
+  heading.textContent = "− 本地独有 · + 服务器独有 · 空白标记表示相同";
+  container.append(heading);
+
+  // Avoid quadratic memory use for very large articles; keep both versions readable.
+  if (localLines.length * serverLines.length > 40000) {
+    const note = document.createElement("p");
+    note.className = "muted";
+    note.textContent = "文章较长，已切换为逐版本查看，避免生成过大的差异矩阵。";
+    container.append(note);
+    for (const [label, lines] of [["本地版本", localLines], ["服务器版本", serverLines]]) {
+      const title = document.createElement("h4");
+      title.textContent = label;
+      const pre = document.createElement("pre");
+      pre.className = "diff-fallback answer";
+      pre.textContent = lines.join("\n");
+      container.append(title, pre);
+    }
+    return;
+  }
+
+  const rows = localLines.length + 1;
+  const cols = serverLines.length + 1;
+  const lcs = Array.from({ length: rows }, () => new Uint16Array(cols));
+  for (let i = localLines.length - 1; i >= 0; i--) {
+    for (let j = serverLines.length - 1; j >= 0; j--) {
+      lcs[i][j] = localLines[i] === serverLines[j]
+        ? lcs[i + 1][j + 1] + 1
+        : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    }
+  }
+
+  const fragment = document.createDocumentFragment();
+  let i = 0;
+  let j = 0;
+  const appendLine = (kind, marker, value, lineNumber) => {
+    const line = document.createElement("div");
+    line.className = "diff-line diff-" + kind;
+    const prefix = document.createElement("span");
+    prefix.className = "diff-marker";
+    prefix.textContent = marker;
+    const number = document.createElement("span");
+    number.className = "diff-number";
+    number.textContent = lineNumber == null ? "" : String(lineNumber);
+    const text = document.createElement("span");
+    text.className = "diff-text";
+    text.textContent = value || " ";
+    line.append(prefix, number, text);
+    fragment.append(line);
+  };
+  while (i < localLines.length || j < serverLines.length) {
+    if (i < localLines.length && j < serverLines.length && localLines[i] === serverLines[j]) {
+      appendLine("same", " ", localLines[i], i + 1);
+      i++; j++;
+    } else if (i < localLines.length && (j >= serverLines.length || lcs[i + 1][j] >= lcs[i][j + 1])) {
+      appendLine("removed", "−", localLines[i], i + 1);
+      i++;
+    } else {
+      appendLine("added", "+", serverLines[j], j + 1);
+      j++;
+    }
+  }
+  container.append(fragment);
+}
+
 async function renderSyncQueue() {
   const summary = document.querySelector("#syncQueueSummary");
   const list = document.querySelector("#syncQueueItems");
@@ -664,19 +735,11 @@ async function renderSyncQueue() {
           const response = await fetch("/api/documents/" + encodeURIComponent(op.entity_id));
           if (!response.ok) throw new Error("HTTP " + response.status);
           const server = await response.json();
-          comparison.textContent = [
-            "===== 本地待同步版本 =====",
-            "标题：" + (op.payload.title || ""),
-            "原文链接：" + (op.payload.source_url || ""),
-            "",
-            op.payload.content_markdown || "",
-            "",
-            "===== 当前服务器版本 =====",
-            "标题：" + (server.title || ""),
-            "原文链接：" + (server.source_url || ""),
-            "",
-            server.content_markdown || ""
-          ].join("\n");
+          renderLineDiff(
+            comparison,
+            ["标题：" + (op.payload.title || ""), "原文链接：" + (op.payload.source_url || ""), "", op.payload.content_markdown || ""].join("\n"),
+            ["标题：" + (server.title || ""), "原文链接：" + (server.source_url || ""), "", server.content_markdown || ""].join("\n")
+          );
         } catch (error) {
           comparison.textContent = "无法读取服务器版本：" + error.message + "。本地内容仍保留。";
         }
