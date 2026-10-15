@@ -149,6 +149,37 @@ def test_wikilink_endpoints_return_404_for_missing_note():
     assert client.get("/api/notes/missing-note/links").status_code == 404
     assert client.get("/api/notes/missing-note/backlinks").status_code == 404
 
+
+def test_note_delete_and_retry_are_idempotent():
+    note = client.post("/api/notes", json={"title": f"Delete me {uuid4().hex}"}).json()
+    operation_id = f"note-delete-{uuid4()}"
+    params = {"operation_id": operation_id, "expected_updated_at": note["updated_at"]}
+    first = client.delete(f"/api/notes/{note['id']}", params=params)
+    second = client.delete(f"/api/notes/{note['id']}", params=params)
+    assert first.status_code == 200, first.text
+    assert first.json()["deleted"] is True
+    assert second.status_code == 200, second.text
+    assert second.json()["duplicate"] is True
+    assert client.get(f"/api/notes/{note['id']}").status_code == 404
+
+
+def test_stale_note_delete_returns_conflict():
+    note = client.post("/api/notes", json={"title": "Delete conflict target"}).json()
+    client.put(f"/api/notes/{note['id']}", json={
+        "title": "Changed on server",
+        "body_markdown": "Newer version",
+        "note_type": "permanent",
+    })
+    response = client.delete(
+        f"/api/notes/{note['id']}",
+        params={
+            "operation_id": f"note-delete-{uuid4()}",
+            "expected_updated_at": note["updated_at"],
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "NOTE_VERSION_CONFLICT"
+
 def test_note_validation_and_not_found():
     invalid = client.post("/api/notes", json={"title": "   ", "body_markdown": "content"})
     assert invalid.status_code == 422
