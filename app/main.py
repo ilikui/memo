@@ -43,14 +43,31 @@ def health():
 def create_note(body: NoteCreate, db: Session = Depends(get_db)):
     if body.document_id and not db.get(Document, body.document_id):
         raise HTTPException(status_code=404, detail="Source document not found")
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title must not be blank")
+    if body.id:
+        existing = db.get(Note, body.id)
+        if existing:
+            same_payload = (
+                existing.title == title
+                and existing.body_markdown == body.body_markdown
+                and existing.note_type == body.note_type
+                and existing.document_id == body.document_id
+            )
+            if same_payload:
+                return existing
+            raise HTTPException(status_code=409, detail={
+                "code": "NOTE_ID_CONFLICT",
+                "message": "A different note already uses this ID.",
+            })
     note = Note(
-        title=body.title.strip(),
+        id=body.id,
+        title=title,
         body_markdown=body.body_markdown,
         note_type=body.note_type,
         document_id=body.document_id,
     )
-    if not note.title:
-        raise HTTPException(status_code=422, detail="title must not be blank")
     db.add(note)
     db.flush()
     append_event(db, f"note-create:{note.id}", "note", note.id, "create", {
@@ -97,6 +114,19 @@ def update_note(note_id: str, body: NoteUpdate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Note not found")
     if body.document_id and not db.get(Document, body.document_id):
         raise HTTPException(status_code=404, detail="Source document not found")
+    if body.expected_updated_at is not None:
+        actual = note.updated_at
+        expected = body.expected_updated_at
+        if actual.tzinfo is None:
+            actual = actual.replace(tzinfo=timezone.utc)
+        if expected.tzinfo is None:
+            expected = expected.replace(tzinfo=timezone.utc)
+        if abs(actual.timestamp() - expected.timestamp()) > 0.001:
+            raise HTTPException(status_code=409, detail={
+                "code": "NOTE_VERSION_CONFLICT",
+                "message": "This note changed on the server. Keep the local copy and resolve the conflict.",
+                "server_updated_at": note.updated_at.isoformat(),
+            })
     title = body.title.strip()
     if not title:
         raise HTTPException(status_code=422, detail="title must not be blank")
