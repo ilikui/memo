@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -152,6 +153,59 @@ def update_note(note_id: str, body: NoteUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(note)
     return note
+
+
+def _extract_wikilinks(markdown: str) -> list[str]:
+    """Return unique [[target]] links in first-seen order; ignore empty targets."""
+    targets = []
+    seen = set()
+    for match in re.finditer(r"(?<!\\!)\\[\\[([^\\]#|]+)(?:#[^\\]|]+)?(?:\\|[^\\]]*)?\\]\\]", markdown):
+        target = match.group(1).strip()
+        if target and target.casefold() not in seen:
+            seen.add(target.casefold())
+            targets.append(target)
+    return targets
+
+
+@app.get("/api/notes/{note_id}/links")
+def get_note_links(note_id: str, db: Session = Depends(get_db)):
+    note = db.get(Note, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    titles = _extract_wikilinks(note.body_markdown)
+    all_notes = list(db.scalars(select(Note).order_by(Note.title.asc())).all())
+    by_title = {item.title.casefold(): item for item in all_notes}
+    links = []
+    for title in titles:
+        target = by_title.get(title.casefold())
+        links.append({
+            "title": title,
+            "resolved": target is not None,
+            "note_id": target.id if target else None,
+            "note_title": target.title if target else None,
+        })
+    return {"note_id": note.id, "links": links}
+
+
+@app.get("/api/notes/{note_id}/backlinks")
+def get_note_backlinks(note_id: str, db: Session = Depends(get_db)):
+    note = db.get(Note, note_id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    all_notes = list(db.scalars(select(Note).order_by(Note.updated_at.desc())).all())
+    backlinks = []
+    for source in all_notes:
+        if source.id == note.id:
+            continue
+        targets = _extract_wikilinks(source.body_markdown)
+        if any(target.casefold() == note.title.casefold() for target in targets):
+            backlinks.append({
+                "id": source.id,
+                "title": source.title,
+                "note_type": source.note_type,
+                "updated_at": source.updated_at.isoformat(),
+            })
+    return {"note_id": note.id, "backlinks": backlinks}
 
 
 @app.post("/api/flashcards", response_model=FlashcardOut, status_code=201)
