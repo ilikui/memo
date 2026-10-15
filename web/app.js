@@ -59,7 +59,7 @@ function renderNotes() {
     const row = document.createElement("div");
     row.className = "note-row";
     const title = document.createElement("strong");
-    title.textContent = note.title;
+    title.textContent = note.title + (note._pending_delete ? "（待删除）" : "");
     const meta = document.createElement("p");
     meta.className = "muted";
     meta.textContent = note.note_type + " · " + new Date(note.updated_at).toLocaleString();
@@ -87,6 +87,7 @@ function renderNotes() {
     }
     const edit = document.createElement("button");
     edit.textContent = "编辑";
+    edit.disabled = Boolean(note._pending_delete);
     edit.addEventListener("click", () => {
       editingNoteId = note.id;
       document.querySelector("#noteTitle").value = note.title;
@@ -99,7 +100,10 @@ function renderNotes() {
     const relationships = document.createElement("button");
     relationships.textContent = "链接关系";
     relationships.addEventListener("click", () => showNoteLinks(note.id));
-    row.append(title, meta, excerpt, edit, relationships);
+    const remove = document.createElement("button");
+    remove.textContent = "删除";
+    remove.addEventListener("click", () => queueDeleteNote(note));
+    row.append(title, meta, excerpt, edit, relationships, remove);
     noteListEl.append(row);
   }
 }
@@ -204,6 +208,38 @@ function resetNoteEditor() {
   document.querySelector("#noteType").value = "permanent";
   document.querySelector("#noteEditing").textContent = "新建笔记";
   document.querySelector("#saveNote").textContent = "保存笔记";
+}
+
+async function queueDeleteNote(note) {
+  if (!confirm("确定删除笔记“" + note.title + "”？同步到服务器后将无法通过此界面恢复。")) return;
+  const operations = await getAll("outbox");
+  const existing = operations.find(op => op.entity_type === "note_mutation" && op.entity_id === note.id);
+  if (existing?.operation === "create") {
+    await transact("outbox", "readwrite", store => store.delete(existing.operation_id));
+    await transact("notes", "readwrite", store => store.delete(note.id));
+    statusEl.textContent = "尚未同步的新笔记已取消创建。";
+    await loadNotes();
+    return;
+  }
+  const now = new Date().toISOString();
+  const operation = {
+    operation_id: crypto.randomUUID(),
+    entity_type: "note_mutation",
+    entity_id: note.id,
+    operation: "delete",
+    payload: {
+      note: { ...note, _pending_delete: true },
+      expected_updated_at: existing?.payload?.expected_updated_at ?? note.updated_at
+    },
+    client_created_at: now,
+    status: "pending"
+  };
+  if (existing) await transact("outbox", "readwrite", store => store.delete(existing.operation_id));
+  await transact("outbox", "readwrite", store => store.put(operation));
+  await transact("notes", "readwrite", store => store.put({ ...note, _pending_delete: true }));
+  statusEl.textContent = navigator.onLine ? "删除已排队，正在同步…" : "离线：删除操作已保存，联网后自动同步。";
+  await loadNotes();
+  await syncOutbox();
 }
 
 async function saveNote() {
