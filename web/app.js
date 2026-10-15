@@ -6,12 +6,13 @@ let cachedNotes = [];
 
 function openDb() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open("vibereading", 2);
+    const req = indexedDB.open("vibereading", 3);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains("cards")) db.createObjectStore("cards", { keyPath: "id" });
       if (!db.objectStoreNames.contains("outbox")) db.createObjectStore("outbox", { keyPath: "operation_id" });
       if (!db.objectStoreNames.contains("notes")) db.createObjectStore("notes", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("readingDocuments")) db.createObjectStore("readingDocuments", { keyPath: "id" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -703,47 +704,84 @@ let activeSelectionEnd = null;
 async function loadReadingList() {
   const list = document.querySelector("#readingList");
   list.replaceChildren();
-  if (!navigator.onLine) {
-    list.textContent = "阅读清单目前需要联网加载；已打开的正文仍可在当前页面中查看。";
+  let documents = [];
+  if (navigator.onLine) {
+    try {
+      const response = await fetch("/api/documents?limit=500");
+      if (!response.ok) throw new Error("Unable to load reading queue");
+      documents = await response.json();
+      for (const item of documents) {
+        const cached = await transact("readingDocuments", "readwrite", store => store.get(item.id));
+        // Do not replace a full cached document with the shorter list summary.
+        if (!cached || !cached.content_markdown) {
+          await transact("readingDocuments", "readwrite", store => store.put(item));
+        } else {
+          await transact("readingDocuments", "readwrite", store => store.put({
+            ...cached, title: item.title, source_url: item.source_url,
+            progress: item.progress, highlight_count: item.highlight_count,
+            updated_at: item.updated_at
+          }));
+        }
+      }
+    } catch {
+      documents = await getAll("readingDocuments");
+      statusEl.textContent = "服务器暂不可用，正在显示本机缓存的阅读清单。";
+    }
+  } else {
+    documents = await getAll("readingDocuments");
+  }
+  if (!documents.length) {
+    list.textContent = navigator.onLine
+      ? "阅读清单还是空的，添加第一篇文章吧。"
+      : "本机没有缓存的阅读材料；联网打开文章后即可离线阅读。";
     return;
   }
-  try {
-    const response = await fetch("/api/documents?limit=500");
-    if (!response.ok) throw new Error("Unable to load reading queue");
-    const documents = await response.json();
-    if (!documents.length) {
-      list.textContent = "阅读清单还是空的，添加第一篇文章吧。";
-      return;
-    }
-    for (const item of documents) {
-      const row = document.createElement("div");
-      row.className = "note-row";
-      const title = document.createElement("strong");
-      title.textContent = item.title;
-      const meta = document.createElement("p");
-      meta.className = "muted";
-      meta.textContent = (item.progress.status === "completed" ? "已完成" : item.progress.status === "reading" ? "阅读中" : "未开始")
-        + " · " + item.progress.progress_percent + "%";
-      const open = document.createElement("button");
-      open.textContent = "继续阅读";
-      open.addEventListener("click", () => openReadingDocument(item.id));
-      row.append(title, meta, open);
-      list.append(row);
-    }
-  } catch {
-    list.textContent = "读取清单失败，请检查网络后重试。";
+  for (const item of documents.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))) {
+    const row = document.createElement("div");
+    row.className = "note-row";
+    const title = document.createElement("strong");
+    title.textContent = item.title;
+    const meta = document.createElement("p");
+    meta.className = "muted";
+    const progress = item.progress || { status: "unread", progress_percent: 0 };
+    meta.textContent = (progress.status === "completed" ? "已完成" : progress.status === "reading" ? "阅读中" : "未开始")
+      + " · " + progress.progress_percent + "%" + (item.content_markdown ? " · 已缓存正文" : " · 尚未缓存正文");
+    const open = document.createElement("button");
+    open.textContent = "继续阅读";
+    open.disabled = !navigator.onLine && !item.content_markdown;
+    open.addEventListener("click", () => openReadingDocument(item.id));
+    row.append(title, meta, open);
+    list.append(row);
   }
 }
 
 async function openReadingDocument(id) {
   try {
-    const response = await fetch("/api/documents/" + encodeURIComponent(id));
-    if (!response.ok) throw new Error("Document not found");
-    const item = await response.json();
+    let item;
+    if (navigator.onLine) {
+      try {
+        const response = await fetch("/api/documents/" + encodeURIComponent(id));
+        if (!response.ok) throw new Error("Document not found");
+        item = await response.json();
+        await transact("readingDocuments", "readwrite", store => store.put(item));
+      } catch {
+        item = await transact("readingDocuments", "readonly", store => store.get(id));
+        if (!item || !item.content_markdown) throw new Error("No cached document available");
+        statusEl.textContent = "已打开本机缓存的文章；离线状态下不能保存修改。";
+      }
+    } else {
+      item = await transact("readingDocuments", "readonly", store => store.get(id));
+      if (!item || !item.content_markdown) throw new Error("No cached document available");
+      statusEl.textContent = "离线阅读模式：正文来自本机缓存，保存与摘录功能需要联网。";
+    }
     activeDocumentId = item.id;
     activeDocumentTitle = item.title;
     activeDocumentUrl = item.source_url || "";
     document.querySelector("#readingEditor").hidden = false;
+    const offline = !navigator.onLine;
+    for (const selector of ["#readingEditTitle", "#readingEditUrl", "#readingStatus", "#readingProgress", "#readingBody", "#saveReadingDocument", "#saveReadingProgress", "#highlightQuote", "#highlightNote", "#captureSelection", "#saveHighlight"]) {
+      document.querySelector(selector).disabled = offline;
+    }
     document.querySelector("#readingCurrentTitle").textContent = item.title;
     document.querySelector("#readingSource").textContent = item.source_url || "未设置原文链接";
     document.querySelector("#readingEditTitle").value = item.title;
