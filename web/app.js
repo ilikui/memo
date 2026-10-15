@@ -103,7 +103,11 @@ function renderNotes() {
     const remove = document.createElement("button");
     remove.textContent = "删除";
     remove.addEventListener("click", () => queueDeleteNote(note));
-    row.append(title, meta, excerpt, edit, relationships, remove);
+    const makeCard = document.createElement("button");
+    makeCard.textContent = "生成闪卡";
+    makeCard.disabled = Boolean(note._pending_delete);
+    makeCard.addEventListener("click", () => createFlashcardFromNote(note));
+    row.append(title, meta, excerpt, edit, relationships, makeCard, remove);
     noteListEl.append(row);
   }
 }
@@ -132,6 +136,154 @@ async function loadNotes() {
   );
   pendingNoteOperations = (await getAll("outbox")).filter(op => op.entity_type === "note_mutation");
   renderNotes();
+}
+
+async function createFlashcardFromNote(note) {
+  if (!navigator.onLine) {
+    statusEl.textContent = "请先联网，才能将笔记转换为闪卡。";
+    return;
+  }
+  const front = prompt("闪卡正面（问题）", note.title);
+  if (front === null || !front.trim()) return;
+  const back = prompt("闪卡背面（答案）", note.body_markdown.slice(0, 2000));
+  if (back === null || !back.trim()) return;
+  try {
+    const response = await fetch("/api/flashcards", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        front: front.trim(),
+        back: back.trim(),
+        source_note_id: note.id
+      })
+    });
+    if (!response.ok) {
+      statusEl.textContent = "生成闪卡失败（HTTP " + response.status + "）。";
+      return;
+    }
+    const card = await response.json();
+    await transact("cards", "readwrite", store => store.put(card));
+    statusEl.textContent = "闪卡已创建，并关联来源笔记“" + note.title + "”。";
+    await refresh();
+  } catch {
+    statusEl.textContent = "网络连接失败，闪卡尚未创建。";
+  }
+}
+
+async function showKnowledgeGraph() {
+  const panel = document.querySelector("#graphPanel");
+  panel.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = "知识图谱与孤立卡片";
+  panel.append(heading);
+  if (!navigator.onLine) {
+    const message = document.createElement("p");
+    message.textContent = "知识图谱需要联网获取完整的笔记关系。";
+    panel.append(message);
+    return;
+  }
+  try {
+    const response = await fetch("/api/notes/graph");
+    if (!response.ok) throw new Error("Graph request failed");
+    const graph = await response.json();
+    const summary = document.createElement("p");
+    summary.textContent = "笔记 " + graph.stats.notes + " 条 · 链接 " + graph.stats.links
+      + " 条 · 孤立卡片 " + graph.stats.orphans + " 条";
+    panel.append(summary);
+    if (!graph.nodes.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "还没有笔记，先创建几张卡片吧。";
+      panel.append(empty);
+      return;
+    }
+    const svgNS = "http://www.w3.org/2000/svg";
+    const width = 760;
+    const height = Math.max(260, Math.ceil(graph.nodes.length / 4) * 110);
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "笔记关系图");
+    svg.style.width = "100%";
+    svg.style.height = "auto";
+    svg.style.border = "1px solid #8885";
+    svg.style.borderRadius = "12px";
+    const positions = new Map();
+    graph.nodes.forEach((node, index) => {
+      const col = index % 4;
+      const row = Math.floor(index / 4);
+      positions.set(node.id, { x: 95 + col * 190, y: 48 + row * 110 });
+    });
+    for (const edge of graph.edges) {
+      const from = positions.get(edge.source);
+      const to = positions.get(edge.target);
+      if (!from || !to) continue;
+      const line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", from.x);
+      line.setAttribute("y1", from.y);
+      line.setAttribute("x2", to.x);
+      line.setAttribute("y2", to.y);
+      line.setAttribute("stroke", "currentColor");
+      line.setAttribute("stroke-opacity", "0.4");
+      line.setAttribute("stroke-width", "1.5");
+      svg.append(line);
+    }
+    for (const node of graph.nodes) {
+      const point = positions.get(node.id);
+      const group = document.createElementNS(svgNS, "g");
+      group.style.cursor = "pointer";
+      const circle = document.createElementNS(svgNS, "circle");
+      circle.setAttribute("cx", point.x);
+      circle.setAttribute("cy", point.y);
+      circle.setAttribute("r", node.orphan ? "24" : "20");
+      circle.setAttribute("fill", node.orphan ? "#d97706" : "#2563eb");
+      circle.setAttribute("fill-opacity", "0.85");
+      const label = document.createElementNS(svgNS, "text");
+      label.setAttribute("x", point.x);
+      label.setAttribute("y", point.y + 36);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("font-size", "11");
+      label.setAttribute("fill", "currentColor");
+      label.textContent = node.title.length > 22 ? node.title.slice(0, 21) + "…" : node.title;
+      const titleEl = document.createElementNS(svgNS, "title");
+      titleEl.textContent = node.title + (node.orphan ? "（孤立卡片）" : "");
+      group.append(circle, label, titleEl);
+      group.addEventListener("click", async () => {
+        const noteResponse = await fetch("/api/notes/" + encodeURIComponent(node.id));
+        if (!noteResponse.ok) return;
+        const selected = await noteResponse.json();
+        editingNoteId = selected.id;
+        document.querySelector("#noteTitle").value = selected.title;
+        document.querySelector("#noteBody").value = selected.body_markdown;
+        document.querySelector("#noteType").value = selected.note_type;
+        document.querySelector("#noteEditing").textContent = "正在编辑：" + selected.title;
+        document.querySelector("#saveNote").textContent = "更新笔记";
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+      svg.append(group);
+    }
+    panel.append(svg);
+    const orphanTitle = document.createElement("h4");
+    orphanTitle.textContent = "孤立卡片（橙色节点）";
+    panel.append(orphanTitle);
+    const orphans = graph.nodes.filter(node => node.orphan);
+    if (!orphans.length) {
+      const none = document.createElement("p");
+      none.textContent = "没有孤立卡片，所有笔记都至少参与一条链接。";
+      panel.append(none);
+    } else {
+      const list = document.createElement("ul");
+      for (const node of orphans) {
+        const item = document.createElement("li");
+        item.textContent = node.title;
+        list.append(item);
+      }
+      panel.append(list);
+    }
+  } catch {
+    const error = document.createElement("p");
+    error.textContent = "加载知识图谱失败，请稍后重试。";
+    panel.append(error);
+  }
 }
 
 async function showNoteLinks(noteId) {
@@ -493,6 +645,7 @@ async function syncOutbox() {
 }
 
 document.querySelector("#noteSearch").addEventListener("input", renderNotes);
+document.querySelector("#showGraph").addEventListener("click", showKnowledgeGraph);
 document.querySelector("#saveNote").addEventListener("click", saveNote);
 document.querySelector("#newNote").addEventListener("click", resetNoteEditor);
 
