@@ -296,7 +296,7 @@ async function syncOutbox() {
         const isCreate = operation.operation === "create";
         const payload = isCreate
           ? { id: note.id, title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id }
-          : { title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id, expected_updated_at: operation.payload.expected_updated_at };
+          : { operation_id: operation.operation_id, title: note.title, body_markdown: note.body_markdown, note_type: note.note_type, document_id: note.document_id, expected_updated_at: operation.payload.expected_updated_at };
         response = await fetch(isCreate ? "/api/notes" : "/api/notes/" + encodeURIComponent(note.id), {
           method: isCreate ? "POST" : "PUT",
           headers: { "Content-Type": "application/json" },
