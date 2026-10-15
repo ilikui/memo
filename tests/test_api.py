@@ -220,3 +220,66 @@ def test_note_validation_and_not_found():
 
     missing = client.get("/api/notes/not-a-real-note")
     assert missing.status_code == 404
+
+
+
+def test_progressive_reading_document_progress_and_highlights():
+    created = client.post("/api/documents", json={
+        "title": f"Reading article {uuid4().hex}",
+        "source_url": "https://example.com/article",
+        "content_markdown": "# Article\\n\\nA key idea worth remembering.",
+    })
+    assert created.status_code == 201, created.text
+    document = created.json()
+    assert document["source_url"] == "https://example.com/article"
+
+    opened = client.get(f"/api/documents/{document['id']}")
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["progress"]["status"] == "unread"
+    assert opened.json()["highlights"] == []
+
+    progress = client.put(f"/api/documents/{document['id']}/progress", json={
+        "status": "reading", "progress_percent": 35, "last_position": 120,
+    })
+    assert progress.status_code == 200, progress.text
+    assert progress.json()["progress_percent"] == 35
+    assert progress.json()["last_position"] == 120
+
+    highlight = client.post(f"/api/documents/{document['id']}/highlights", json={
+        "quote_text": "A key idea worth remembering.",
+        "note": "This connects to my permanent note.",
+        "position_start": 10,
+        "position_end": 38,
+    })
+    assert highlight.status_code == 201, highlight.text
+    assert highlight.json()["quote_text"] == "A key idea worth remembering."
+
+    refreshed = client.get(f"/api/documents/{document['id']}")
+    assert len(refreshed.json()["highlights"]) == 1
+    assert refreshed.json()["progress"]["status"] == "reading"
+    listed = client.get("/api/documents", params={"status": "reading"})
+    assert any(item["id"] == document["id"] and item["highlight_count"] == 1 for item in listed.json())
+
+    deleted = client.delete(f"/api/documents/{document['id']}/highlights/{highlight.json()['id']}")
+    assert deleted.status_code == 200
+    assert client.get(f"/api/documents/{document['id']}/highlights").json() == []
+
+
+def test_progressive_reading_validation_and_missing_document():
+    invalid_url = client.post("/api/documents", json={
+        "title": "Invalid source URL", "source_url": "javascript:alert(1)",
+    })
+    assert invalid_url.status_code == 422
+
+    missing_progress = client.put("/api/documents/no-such-document/progress", json={
+        "progress_percent": 120,
+    })
+    assert missing_progress.status_code == 422
+    missing_document = client.get("/api/documents/no-such-document")
+    assert missing_document.status_code == 404
+
+    document = client.post("/api/documents", json={"title": "Validation article"}).json()
+    invalid_highlight = client.post(f"/api/documents/{document['id']}/highlights", json={
+        "quote_text": "Text", "position_start": 50, "position_end": 10,
+    })
+    assert invalid_highlight.status_code == 422
