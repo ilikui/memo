@@ -869,85 +869,100 @@ function renderHighlights(highlights) {
         statusEl.textContent = "摘录已删除。";
       }
     });
+    const makeLiterature = document.createElement("button");
+    makeLiterature.textContent = "生成文献笔记";
+    makeLiterature.addEventListener("click", () => convertHighlightToKnowledge(item, "literature"));
     const makeNote = document.createElement("button");
-    makeNote.textContent = "转为永久笔记";
-    makeNote.addEventListener("click", () => convertHighlightToKnowledge(item, false));
+    makeNote.textContent = "生成永久笔记";
+    makeNote.addEventListener("click", () => convertHighlightToKnowledge(item, "permanent"));
     const makeCard = document.createElement("button");
     makeCard.textContent = "生成闪卡";
-    makeCard.addEventListener("click", () => convertHighlightToKnowledge(item, true));
-    card.append(makeNote, makeCard, remove);
+    makeCard.addEventListener("click", () => convertHighlightToKnowledge(item, "card"));
+    card.append(makeLiterature, makeNote, makeCard, remove);
     panel.append(card);
   }
 }
 
-async function convertHighlightToKnowledge(highlight, createCard) {
-  const noteTitle = activeDocumentTitle + "｜摘录与思考";
-  const noteBody = [
-    "## 原文摘录",
-    "",
-    highlight.quote_text,
-    "",
-    "## 我的思考",
-    "",
-    highlight.note || "（待补充自己的理解、反例与应用场景）",
-    "",
-    "## 来源",
-    "",
-    activeDocumentUrl ? "- 文献：[" + activeDocumentTitle + "](" + activeDocumentUrl + ")" : "- 文献：" + activeDocumentTitle,
-    "- 阅读材料 ID：" + activeDocumentId,
+async function convertHighlightToKnowledge(highlight, target) {
+  const literatureId = highlight.id;
+  const permanentId = "p" + highlight.id.slice(1);
+  const literatureTitle = activeDocumentTitle + "｜文献笔记｜" + highlight.id.slice(0, 8);
+  const permanentTitle = activeDocumentTitle + "｜永久笔记｜" + highlight.id.slice(0, 8);
+  const sourceLine = activeDocumentUrl
+    ? "- 文献：[" + activeDocumentTitle + "](" + activeDocumentUrl + ")"
+    : "- 文献：" + activeDocumentTitle;
+  const marker = "<!-- source-highlight-id: " + highlight.id + " -->";
+  const literatureBody = [
+    marker, "", "## 原文摘录", "", highlight.quote_text, "",
+    "## 阅读批注", "", highlight.note || "（待补充阅读时的即时想法）", "",
+    "## 来源", "", sourceLine, "- 阅读材料 ID：" + activeDocumentId
   ].join("\n");
-  try {
-    const noteResponse = await fetch("/api/notes", {
+  const permanentBody = [
+    marker, "", "## 核心观点", "",
+    highlight.note || "（请用自己的话提炼这段摘录的核心观点）", "",
+    "## 论据与原文", "", highlight.quote_text, "",
+    "## 来源与关联", "",
+    "- 文献笔记： [[" + literatureTitle + "]]", sourceLine,
+    "- 阅读材料 ID：" + activeDocumentId
+  ].join("\n");
+
+  async function ensureNote(id, title, body, noteType) {
+    const response = await fetch("/api/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: highlight.id, title: noteTitle, body_markdown: noteBody, note_type: "permanent", document_id: activeDocumentId })
+      body: JSON.stringify({ id, title, body_markdown: body, note_type: noteType, document_id: activeDocumentId })
     });
-    if (!noteResponse.ok) {
-      statusEl.textContent = "创建永久笔记失败（HTTP " + noteResponse.status + "）。";
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error("保存笔记失败（HTTP " + response.status + "）：" + detail);
+    }
+    return response.json();
+  }
+
+  try {
+    const literatureNote = await ensureNote(literatureId, literatureTitle, literatureBody, "literature");
+    if (target === "literature") {
+      statusEl.textContent = "文献笔记已保存；重复操作会复用同一条笔记。";
+      await loadNotes();
       return;
     }
-    const note = await noteResponse.json();
-    if (createCard) {
+
+    const permanentNote = await ensureNote(permanentId, permanentTitle, permanentBody, "permanent");
+    if (target === "card") {
       const existingCardsResponse = await fetch("/api/flashcards?limit=500");
-      if (!existingCardsResponse.ok) {
-        statusEl.textContent = "永久笔记已保存，但无法检查是否已有闪卡；请稍后重试。";
-        await loadNotes();
-        return;
-      }
+      if (!existingCardsResponse.ok) throw new Error("永久笔记已保存，但无法检查已有闪卡。");
       const existingCards = await existingCardsResponse.json();
-      if (existingCards.some(card => card.source_note_id === note.id)) {
-        statusEl.textContent = "这条摘录已经关联闪卡了，已跳过重复创建。";
+      if (existingCards.some(card => card.source_note_id === permanentNote.id)) {
+        statusEl.textContent = "永久笔记和闪卡均已存在，已跳过重复创建。";
         await loadNotes();
         await refresh();
         return;
       }
-      const front = prompt("闪卡正面：把摘录转成一个值得回忆的问题", "这段摘录的核心观点是什么？");
+      const front = prompt("闪卡正面：把核心观点转成一个值得回忆的问题", "这段摘录的核心观点是什么？");
       if (front === null) return;
       const back = prompt("闪卡背面：用自己的话概括答案", highlight.note || highlight.quote_text);
       if (back === null) return;
       if (!front.trim() || !back.trim()) {
-        statusEl.textContent = "闪卡正反面不能为空；永久笔记已保存。";
+        statusEl.textContent = "闪卡正反面不能为空；文献笔记和永久笔记已保存。";
+        await loadNotes();
         return;
       }
       const cardResponse = await fetch("/api/flashcards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ front: front.trim(), back: back.trim(), source_note_id: note.id })
+        body: JSON.stringify({ front: front.trim(), back: back.trim(), source_note_id: permanentNote.id })
       });
-      if (!cardResponse.ok) {
-        statusEl.textContent = "永久笔记已保存，但创建闪卡失败（HTTP " + cardResponse.status + "）。";
-        return;
-      }
+      if (!cardResponse.ok) throw new Error("笔记已保存，但创建闪卡失败（HTTP " + cardResponse.status + "）。");
       const savedCard = await cardResponse.json();
       await transact("cards", "readwrite", store => store.put(savedCard));
-      statusEl.textContent = "已生成永久笔记和关联闪卡。";
+      statusEl.textContent = "已保存文献笔记、永久笔记，并生成关联闪卡。";
       await refresh();
     } else {
-      statusEl.textContent = "摘录已转为永久笔记。";
+      statusEl.textContent = "文献笔记与永久笔记已建立关联。";
     }
     await loadNotes();
-  } catch {
-    statusEl.textContent = "转换失败，请检查网络后重试。";
+  } catch (error) {
+    statusEl.textContent = error.message || "转换失败，请检查网络后重试。";
   }
 }
 
