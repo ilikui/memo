@@ -584,6 +584,65 @@ async function queueReview(card, rating) {
   await syncOutbox();
 }
 
+const syncQueueLabels = {
+  note_mutation: "笔记变更",
+  flashcard_review: "闪卡复习",
+  reading_progress: "阅读进度",
+  reading_highlight_create: "阅读摘录",
+  reading_document_update: "文章正文修改"
+};
+
+async function renderSyncQueue() {
+  const summary = document.querySelector("#syncQueueSummary");
+  const list = document.querySelector("#syncQueueItems");
+  if (!summary || !list) return;
+  let operations;
+  try { operations = await getAll("outbox"); }
+  catch { summary.textContent = "无法读取本地同步队列。"; return; }
+  operations.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
+  const pending = operations.filter(op => op.status !== "conflict");
+  const conflicts = operations.filter(op => op.status === "conflict");
+  summary.textContent = `待同步 ${pending.length} 项 · 冲突 ${conflicts.length} 项${navigator.onLine ? "" : " · 当前离线"}`;
+  list.replaceChildren();
+  if (!operations.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "队列为空，所有本地操作都已同步。";
+    list.append(empty);
+  }
+  for (const op of operations) {
+    const row = document.createElement("article");
+    row.className = "note-row";
+    const title = document.createElement("strong");
+    title.textContent = syncQueueLabels[op.entity_type] || op.entity_type || "未知操作";
+    const detail = document.createElement("p");
+    detail.className = "muted";
+    detail.textContent = (op.status === "conflict" ? "冲突待处理" : "等待同步")
+      + " · " + new Date(op.created_at || Date.now()).toLocaleString()
+      + (op.server_message ? " · " + op.server_message : "");
+    row.append(title, detail);
+    if (op.entity_type === "reading_document_update" && op.payload?.title) {
+      const name = document.createElement("p");
+      name.textContent = "文章：" + op.payload.title;
+      row.append(name);
+    }
+    const retry = document.createElement("button");
+    retry.textContent = op.status === "conflict" ? "重新尝试" : "立即重试";
+    retry.disabled = !navigator.onLine;
+    retry.addEventListener("click", async () => {
+      if (op.status === "conflict" && !confirm("重新尝试可能再次遇到版本冲突。是否继续？")) return;
+      op.status = "pending";
+      delete op.server_message;
+      await transact("outbox", "readwrite", store => store.put(op));
+      await renderSyncQueue();
+      await syncOutbox();
+    });
+    row.append(retry);
+    list.append(row);
+  }
+  document.querySelector("#retrySyncQueue").disabled = !navigator.onLine || pending.length === 0;
+}
+
 async function syncOutbox() {
   if (!navigator.onLine) {
     statusEl.textContent = "离线：笔记和复习操作会在恢复连接后重试。";
@@ -741,6 +800,7 @@ async function syncOutbox() {
   await refresh();
   await loadReadingList();
   if (activeDocumentId) await reloadHighlights();
+  await renderSyncQueue();
 }
 
 document.querySelector("#noteSearch").addEventListener("input", renderNotes);
@@ -1270,6 +1330,7 @@ window.addEventListener("online", async () => {
   updateReadingEditorAvailability();
   await Promise.all([loadNotes(), refresh(), loadReadingList()]);
   await syncOutbox();
+  await renderSyncQueue();
 });
 window.addEventListener("offline", async () => {
   statusEl.textContent = "当前离线：阅读正文可使用本机缓存。";
@@ -1277,6 +1338,7 @@ window.addEventListener("offline", async () => {
   await loadReadingList();
 });
 
+document.querySelector("#retrySyncQueue").addEventListener("click", syncOutbox);
 document.querySelector("#createDocument").addEventListener("click", createReadingDocument);
 document.querySelector("#saveReadingDocument").addEventListener("click", saveReadingDocument);
 document.querySelector("#saveReadingProgress").addEventListener("click", saveReadingProgress);
