@@ -18,6 +18,12 @@ textarea{min-height:180px;font:inherit}
 </style></head>
 <body>
 <h1>VibeReading</h1><p>渐进阅读 · 卢曼卡片 · FSRS 间隔复习</p><p id="status">Starting…</p>
+<section class="card" id="syncQueuePanel" aria-live="polite">
+  <h2>同步队列</h2>
+  <p id="syncQueueSummary" class="muted">正在检查本地待同步操作…</p>
+  <div id="syncQueueItems"></div>
+  <button id="retrySyncQueue">重试可同步操作</button>
+</section>
 <section class="card">
 <h2>Markdown 笔记</h2>
 <button id="showGraph">知识图谱 / 孤立卡片</button>
