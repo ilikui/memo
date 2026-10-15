@@ -1,3 +1,5 @@
+import { buildLineDiff } from "./conflict-diff.js";
+
 const statusEl = document.querySelector("#status");
 const cardsEl = document.querySelector("#cards");
 const noteListEl = document.querySelector("#noteList");
@@ -596,8 +598,7 @@ const syncQueueLabels = {
 };
 
 function renderLineDiff(container, localText, serverText) {
-  const localLines = localText.split("\n");
-  const serverLines = serverText.split("\n");
+  const diff = buildLineDiff(localText, serverText);
   container.replaceChildren();
 
   const heading = document.createElement("div");
@@ -605,13 +606,12 @@ function renderLineDiff(container, localText, serverText) {
   heading.textContent = "− 本地独有 · + 服务器独有 · 空白标记表示相同";
   container.append(heading);
 
-  // Avoid quadratic memory use for very large articles; keep both versions readable.
-  if (localLines.length * serverLines.length > 40000) {
+  if (diff.fallback) {
     const note = document.createElement("p");
     note.className = "muted";
     note.textContent = "文章较长，已切换为逐版本查看，避免生成过大的差异矩阵。";
     container.append(note);
-    for (const [label, lines] of [["本地版本", localLines], ["服务器版本", serverLines]]) {
+    for (const [label, lines] of [["本地版本", diff.localLines], ["服务器版本", diff.serverLines]]) {
       const title = document.createElement("h4");
       title.textContent = label;
       const pre = document.createElement("pre");
@@ -622,46 +622,21 @@ function renderLineDiff(container, localText, serverText) {
     return;
   }
 
-  const rows = localLines.length + 1;
-  const cols = serverLines.length + 1;
-  const lcs = Array.from({ length: rows }, () => new Uint16Array(cols));
-  for (let i = localLines.length - 1; i >= 0; i--) {
-    for (let j = serverLines.length - 1; j >= 0; j--) {
-      lcs[i][j] = localLines[i] === serverLines[j]
-        ? lcs[i + 1][j + 1] + 1
-        : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-    }
-  }
-
   const fragment = document.createDocumentFragment();
-  let i = 0;
-  let j = 0;
-  const appendLine = (kind, marker, value, lineNumber) => {
+  for (const item of diff.lines) {
     const line = document.createElement("div");
-    line.className = "diff-line diff-" + kind;
+    line.className = "diff-line diff-" + item.kind;
     const prefix = document.createElement("span");
     prefix.className = "diff-marker";
-    prefix.textContent = marker;
+    prefix.textContent = item.marker;
     const number = document.createElement("span");
     number.className = "diff-number";
-    number.textContent = lineNumber == null ? "" : String(lineNumber);
+    number.textContent = String(item.lineNumber);
     const text = document.createElement("span");
     text.className = "diff-text";
-    text.textContent = value || " ";
+    text.textContent = item.text || " ";
     line.append(prefix, number, text);
     fragment.append(line);
-  };
-  while (i < localLines.length || j < serverLines.length) {
-    if (i < localLines.length && j < serverLines.length && localLines[i] === serverLines[j]) {
-      appendLine("same", " ", localLines[i], i + 1);
-      i++; j++;
-    } else if (i < localLines.length && (j >= serverLines.length || lcs[i + 1][j] >= lcs[i][j + 1])) {
-      appendLine("removed", "−", localLines[i], i + 1);
-      i++;
-    } else {
-      appendLine("added", "+", serverLines[j], j + 1);
-      j++;
-    }
   }
   container.append(fragment);
 }
