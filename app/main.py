@@ -1,6 +1,9 @@
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -12,6 +15,10 @@ from .services.sync import append_event
 
 app = FastAPI(title="VibeReading API", version="0.1.0")
 Base.metadata.create_all(bind=engine)  # Development only. Use Alembic migrations in production.
+
+@app.get("/")
+def home():
+    return RedirectResponse(url="/web/index.html")
 
 @app.get("/api/health")
 def health():
@@ -105,3 +112,6 @@ def review_logs(card_id: str | None = None, limit: int = Query(100, ge=1, le=500
     return [{"id": r.id, "flashcard_id": r.flashcard_id, "operation_id": r.operation_id,
              "rating": r.rating, "reviewed_at": r.reviewed_at.isoformat(), "due_after": r.due_after.isoformat()}
             for r in db.scalars(stmt).all()]
+
+# Serve the PWA shell from the same origin so API requests need no CORS setup.
+app.mount("/web", StaticFiles(directory=str(Path(__file__).resolve().parent.parent / "web")), name="web")
