@@ -779,7 +779,7 @@ async function openReadingDocument(id) {
         statusEl.textContent = "已打开本机缓存的文章；离线状态下不能保存修改。";
       }
     } else {
-      item = await transact("readingDocuments", "readonly", store => store.get(id));
+      item = await getById("readingDocuments", id);
       if (!item || !item.content_markdown) throw new Error("No cached document available");
       statusEl.textContent = "离线阅读模式：正文来自本机缓存，保存与摘录功能需要联网。";
     }
@@ -860,6 +860,14 @@ async function saveReadingDocument() {
       body: JSON.stringify({ title, source_url, content_markdown })
     });
     if (!response.ok) throw new Error("save failed");
+    const saved = await response.json();
+    const cached = await getById("readingDocuments", activeDocumentId);
+    await transact("readingDocuments", "readwrite", store => store.put({
+      ...(cached || {}), ...saved,
+      id: activeDocumentId, title, source_url, content_markdown,
+      progress: cached?.progress || { status: "unread", progress_percent: 0, last_position: 0 },
+      highlights: cached?.highlights || []
+    }));
     document.querySelector("#readingCurrentTitle").textContent = title;
     document.querySelector("#readingSource").textContent = source_url || "未设置原文链接";
     statusEl.textContent = "文章正文已保存。";
@@ -880,6 +888,13 @@ async function saveReadingProgress() {
       body: JSON.stringify({ status, progress_percent, last_position: document.querySelector("#readingBody").selectionStart || 0 })
     });
     if (!response.ok) throw new Error("progress save failed");
+    const savedProgress = await response.json();
+    const cached = await getById("readingDocuments", activeDocumentId);
+    if (cached) {
+      await transact("readingDocuments", "readwrite", store => store.put({
+        ...cached, progress: savedProgress
+      }));
+    }
     statusEl.textContent = "阅读进度已保存。";
     await loadReadingList();
   } catch {
