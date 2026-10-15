@@ -109,6 +109,12 @@ def get_note(note_id: str, db: Session = Depends(get_db)):
 
 @app.put("/api/notes/{note_id}", response_model=NoteOut)
 def update_note(note_id: str, body: NoteUpdate, db: Session = Depends(get_db)):
+    if body.operation_id:
+        prior_event = db.scalar(select(SyncEvent).where(SyncEvent.event_id == body.operation_id))
+        if prior_event and prior_event.entity_type == "note" and prior_event.entity_id == note_id:
+            existing_note = db.get(Note, note_id)
+            if existing_note:
+                return existing_note
     note = db.get(Note, note_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
@@ -135,7 +141,7 @@ def update_note(note_id: str, body: NoteUpdate, db: Session = Depends(get_db)):
     note.note_type = body.note_type
     note.document_id = body.document_id
     note.updated_at = datetime.now(timezone.utc)
-    append_event(db, f"note-update:{note.id}:{uuid4()}", "note", note.id, "update", {
+    append_event(db, body.operation_id or f"note-update:{note.id}:{uuid4()}", "note", note.id, "update", {
         "id": note.id,
         "title": note.title,
         "body_markdown": note.body_markdown,
