@@ -207,6 +207,38 @@ def get_note_backlinks(note_id: str, db: Session = Depends(get_db)):
     return {"note_id": note.id, "backlinks": backlinks}
 
 
+@app.get("/api/notes/graph")
+def get_note_graph(db: Session = Depends(get_db)):
+    notes = list(db.scalars(select(Note).order_by(Note.title.asc())).all())
+    by_title = {note.title.casefold(): note for note in notes}
+    edges = []
+    linked_ids = set()
+    for source in notes:
+        for target_title in _extract_wikilinks(source.body_markdown):
+            target = by_title.get(target_title.casefold())
+            if target:
+                edges.append({"source": source.id, "target": target.id})
+                linked_ids.add(source.id)
+                linked_ids.add(target.id)
+    nodes = [{
+        "id": note.id,
+        "title": note.title,
+        "note_type": note.note_type,
+        "updated_at": note.updated_at.isoformat(),
+        "orphan": note.id not in linked_ids,
+    } for note in notes]
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "orphan_note_ids": [node["id"] for node in nodes if node["orphan"]],
+        "stats": {
+            "notes": len(nodes),
+            "links": len(edges),
+            "orphans": sum(1 for node in nodes if node["orphan"]),
+        },
+    }
+
+
 @app.delete("/api/notes/{note_id}")
 def delete_note(
     note_id: str,
