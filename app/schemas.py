@@ -41,6 +41,7 @@ class ReviewOut(BaseModel):
 
 
 class NoteCreate(BaseModel):
+    id: str | None = Field(default=None, min_length=8, max_length=36)
     title: str = Field(min_length=1, max_length=500)
     body_markdown: str = Field(default="", max_length=200000)
     note_type: NoteType = "permanent"
@@ -52,6 +53,7 @@ class NoteUpdate(BaseModel):
     body_markdown: str = Field(default="", max_length=200000)
     note_type: NoteType = "permanent"
     document_id: str | None = None
+    expected_updated_at: datetime | None = None
 
 
 class NoteOut(BaseModel):
