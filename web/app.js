@@ -893,9 +893,9 @@ async function convertHighlightToKnowledge(highlight, createCard) {
     "",
     "## 来源",
     "",
-    "- 文献：[" + activeDocumentTitle.replace(/\\]/g, "\\\\").replace(/\\[/g, "\\\\[") + "](" + (activeDocumentUrl || "") + ")",
+    activeDocumentUrl ? "- 文献：[" + activeDocumentTitle + "](" + activeDocumentUrl + ")" : "- 文献：" + activeDocumentTitle,
     "- 阅读材料 ID：" + activeDocumentId,
-  ].join("\\n");
+  ].join("\n");
   try {
     const noteResponse = await fetch("/api/notes", {
       method: "POST",
