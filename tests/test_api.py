@@ -318,6 +318,33 @@ def test_progressive_reading_validation_and_missing_document():
 
 
 
+def test_reading_document_update_can_retry_against_latest_version_after_conflict():
+    created = client.post("/api/documents", json={
+        "title": f"Conflict resolution {uuid4().hex}",
+        "content_markdown": "Original body",
+    })
+    assert created.status_code == 201, created.text
+    document = created.json()
+
+    concurrent = client.put(f"/api/documents/{document['id']}", json={
+        "title": "Concurrent server edit",
+        "content_markdown": "Server's newer body",
+        "expected_updated_at": document["updated_at"],
+    })
+    assert concurrent.status_code == 200, concurrent.text
+
+    # Resolution flow explicitly fetches the latest version before retrying.
+    latest = client.get(f"/api/documents/{document['id']}").json()
+    resolved = client.put(f"/api/documents/{document['id']}", json={
+        "title": "Chosen local version",
+        "content_markdown": "Intentionally restored local body",
+        "expected_updated_at": latest["updated_at"],
+    })
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["title"] == "Chosen local version"
+    assert resolved.json()["content_markdown"] == "Intentionally restored local body"
+
+
 def test_stale_reading_document_update_returns_conflict():
     created = client.post("/api/documents", json={
         "title": f"Concurrent edit {uuid4().hex}",
