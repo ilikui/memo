@@ -86,6 +86,10 @@ def test_note_create_is_idempotent_for_client_generated_id():
     assert second.status_code == 201, second.text
     assert first.json()["id"] == second.json()["id"] == note_id
 
+    conflicting_retry = client.post("/api/notes", json={**payload, "body_markdown": "Different payload"})
+    assert conflicting_retry.status_code == 409
+    assert conflicting_retry.json()["detail"]["code"] == "NOTE_ID_CONFLICT"
+
 
 def test_stale_note_update_returns_conflict():
     note = client.post("/api/notes", json={"title": "Conflict target"}).json()
