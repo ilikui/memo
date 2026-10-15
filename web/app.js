@@ -146,6 +146,9 @@ async function saveNote() {
   }
   const isEditing = Boolean(editingNoteId);
   const previous = isEditing ? cachedNotes.find(note => note.id === editingNoteId) : null;
+  const existingPending = isEditing
+    ? (await getAll("outbox")).find(op => op.entity_type === "note_mutation" && op.entity_id === editingNoteId)
+    : null;
   const now = new Date().toISOString();
   const note = {
     id: isEditing ? editingNoteId : crypto.randomUUID(),
@@ -154,18 +157,30 @@ async function saveNote() {
     created_at: previous?.created_at ?? now,
     updated_at: now
   };
-  const operation = {
-    operation_id: crypto.randomUUID(),
-    entity_type: "note_mutation",
-    entity_id: note.id,
-    operation: isEditing ? "update" : "create",
-    payload: {
-      note,
-      expected_updated_at: previous?.updated_at ?? null
-    },
-    client_created_at: now,
-    status: "pending"
-  };
+  const operation = existingPending
+    ? {
+        ...existingPending,
+        operation_id: existingPending.operation === "create" ? existingPending.operation_id : crypto.randomUUID(),
+        operation: existingPending.operation,
+        payload: {
+          note,
+          expected_updated_at: existingPending.payload.expected_updated_at
+        },
+        client_created_at: now,
+        status: "pending"
+      }
+    : {
+        operation_id: crypto.randomUUID(),
+        entity_type: "note_mutation",
+        entity_id: note.id,
+        operation: isEditing ? "update" : "create",
+        payload: {
+          note,
+          expected_updated_at: previous?.updated_at ?? null
+        },
+        client_created_at: now,
+        status: "pending"
+      };
   await transact("notes", "readwrite", store => store.put(note));
   await transact("outbox", "readwrite", store => store.put(operation));
   statusEl.textContent = navigator.onLine
